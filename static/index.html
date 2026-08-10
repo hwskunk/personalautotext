@@ -224,7 +224,7 @@
     font-size: 12.5px;
   }
   .style-cell .k { font-weight: 700; color: var(--glaze-deep); margin-bottom: 2px; }
-  .style-cell .v { color: var(--ink); }
+  .style-cell .v { color: var(--ink); white-space: pre-wrap; word-break: break-word; }
   .style-meta { font-size: 11.5px; color: var(--ink-soft); margin-top: 10px; }
 
   /* ---------- 输出区 ---------- */
@@ -339,9 +339,8 @@
     </div>
     <div class="btn-row mode-row">
       <span class="mode-label">风格模式</span>
-      <button class="btn btn-ghost mode-btn" data-mode="full">完整画像</button>
+      <button class="btn btn-ghost mode-btn mode-active" data-mode="style">风格画像·推荐</button>
       <button class="btn btn-ghost mode-btn" data-mode="none">仅示例</button>
-      <button class="btn btn-ghost mode-btn mode-active" data-mode="slim">精简画像·推荐</button>
     </div>
     <div class="output" id="output"></div>
   </section>
@@ -407,9 +406,21 @@
 
   /* ---------- 画像渲染 ---------- */
   const STYLE_LABELS = {
-    identity:'身份', tone:'语气', vocabulary:'词汇偏好', sentence_style:'句式习惯',
-    structure:'结构套路', title_style:'标题风格', length_guide:'篇幅与节奏', avoid:'要避免的'
+    structure:'结构骨架', openings:'开头句库', core_templates:'观念主体', closings:'收尾句库',
+    imagery:'意象', tone_anchors:'语气锚点', humor:'幽默套路', length:'篇幅', avoid:'要避免的'
   };
+  // 画像字段格式化：数组（句库/意象/锚点）换行展示，length 对象拼成"min-median-max 字"
+  function fmtStyleValue(k, v) {
+    if (k === 'length' && v && typeof v === 'object') return `${v.min}-${v.median}-${v.max} 字`;
+    if (Array.isArray(v)) {
+      return v
+        .filter(it => it && typeof it === 'object')
+        .map(it => (it.pattern || '') + (it.pattern && it.example ? ' 例：' : '') + (it.example || ''))
+        .filter(Boolean)
+        .join('\n');
+    }
+    return v;
+  }
   function renderStyle() {
     styleArea.innerHTML = '';
     styleHint.textContent = '基于全部样本提炼';
@@ -421,11 +432,16 @@
     const grid = document.createElement('div');
     grid.className = 'style-grid';
     Object.entries(STYLE_LABELS).forEach(([k, label]) => {
-      const v = s[k];
-      if (!v || v === '（未提炼）') return;
+      // structure 字段附带它的原句例一起展示
+      const v = k === 'structure' && s.structure_example
+        ? s[k] + '\n（原句例：' + s.structure_example + '）'
+        : s[k];
+      if (v === undefined || v === null || v === '') return;
+      if (typeof v === 'string' && v === '（未提炼）') return;
+      if (Array.isArray(v) && !v.length) return;
       const cell = document.createElement('div');
       cell.className = 'style-cell';
-      cell.innerHTML = `<div class="k">${label}</div><div class="v">${escapeHtml(v)}</div>`;
+      cell.innerHTML = `<div class="k">${label}</div><div class="v">${escapeHtml(fmtStyleValue(k, v))}</div>`;
       grid.appendChild(cell);
     });
     styleArea.appendChild(grid);
@@ -498,7 +514,7 @@
   });
 
   /* ---------- 风格模式切换 ---------- */
-  let styleMode = 'slim';
+  let styleMode = 'style';
   const modeBtns = [...document.querySelectorAll('.mode-btn')];
   modeBtns.forEach(m => m.addEventListener('click', () => {
     styleMode = m.dataset.mode;

@@ -107,7 +107,7 @@ async def build_topic(request: Request):
 async def generate(request: Request):
     body = await request.json()
     text_type = body.get("type", "xiaohongshu")
-    style_mode = body.get("style_mode", "slim")
+    style_mode = body.get("style_mode", "style")
     topic = body.get("topic")
 
     if text_type not in generator.TYPES:

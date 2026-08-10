@@ -1,5 +1,5 @@
 # ==========================================
-# generator.py — 文案生成（三种类型 × 三种风格模式，流式输出）
+# generator.py — 文案生成（两种类型要求 × 两种风格模式，流式输出）
 # 生成时 = 风格模式(画像/示例组合) + 类型要求
 # ==========================================
 import random
@@ -7,7 +7,7 @@ import re
 
 from config import ALLOWED_EXTENSIONS, DATA_DIR
 from llm import get_chat_model
-from style_manager import STYLE_FIELDS, load_style, read_all_samples
+from style_manager import SUBTYPE_NAMES, _split_entries, load_style
 
 # 开场场景池：每次生成由代码随机抽一个注入 prompt，
 # 避免模型凭先验反复选同一个开场（如"送砖+摸砖面"）。
@@ -56,9 +56,9 @@ TYPES = {
         "label": "朋友圈短文案",
         "requirement": (
             "请写一条朋友圈文案，像这位老板平时随手发的那样。参考文本是'格言体'：\n"
-            "1. 主体是观念断言：对生意、信任、坚持、辛苦的朴实判断，像'信任这东西很珍贵，一旦给了，就不能辜负''好的生意，从来不是靠低价内卷''晚归，不是因为夜色迷人'\n"
+            "1. 主体是观念断言，主题面要宽：写信任、写坚持、写品质、写时节节气、写节日祝福、写晚归自嘲都可以，像参考样本那样换着角度写，这次写了信任，下次就换坚持或时节，不要每次都是同一个主题；感受示例原句的口吻（如'信任这东西很珍贵，一旦给了，就不能辜负''好的生意，从来不是靠低价内卷''在平凡的日常里坚守热爱'），主题要自己重新想\n"
             "2. 当天的状态只做引子，最多一两句带过，不要写事件流水账（不要'茶水烧了几遍''摸了几块砖''数到第几张'这类过程细节）\n"
-            "3. 多用判断句：'不是……，而是……''……，才是……''……，是……，也是……''别人……，而我……''把……做……'，模仿参考文本的句式节奏\n"
+            "3. 判断句是主体：'不是……，而是……''……，才是……''……，是……，也是……'这类都可以用，但句式要多样，和参考文本一样偶尔出现即可，不要每篇都重复同一个句式\n"
             "4. 收尾方式要多样：一句感谢、一句承诺、一句自我打气、一句自嘲或直接以表情收尾都可以，不要每篇都用'搬砖人''加油'这类固定收尾（参考文本里'加油，搬砖人'只偶尔出现）\n"
             "5. 可以对'你'（客户）说一句承诺或感谢，但必须落在信任、责任、靠谱上，不要写成促销表白（不要'你选的砖，我送的稳'这类对仗表白）\n"
             "6. 不编造人名，不出现对话和台词（'师傅说''客户说'都算），提到人只用泛称：客户、师傅、兄弟们、新老顾客\n"
@@ -81,17 +81,9 @@ TYPES = {
 
 # 示例条目：单条最大字符数 / 每次生成携带的条目数
 MAX_ENTRY_CHARS = 600
-ENTRY_COUNT = 3
+ENTRY_COUNT = 6
 
 _example_pool: list[str] = []
-
-
-def _split_entries(text: str) -> list[str]:
-    """按 2 个以上空行切分独立条目（1 个空行视为篇内换行），过滤碎片"""
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"[ \t]+\n", "\n", text)  # 去行尾空白
-    entries = [e.strip() for e in re.split(r"\n{3,}", text) if e.strip()]
-    return [e for e in entries if len(re.findall(r"[一-鿿]", e)) >= 4]
 
 
 def _refill_pool() -> None:
@@ -105,41 +97,177 @@ def _refill_pool() -> None:
     random.shuffle(_example_pool)
 
 
-def _pick_examples(n: int = ENTRY_COUNT) -> str:
-    """从示例条目池中洗牌轮换取 n 条（池空自动重建，一轮内不重复）"""
-    global _example_pool
-    if not _example_pool:
-        _refill_pool()
-    picked = []
-    while len(picked) < n and _example_pool:
-        picked.append(_example_pool.pop())
-    if not _example_pool:
-        _refill_pool()  # 预填充下一轮
-    if not picked:
+# 子类型均衡抽取用的分类型池：每类一个小池，类内一轮不重复
+_subtype_pools: dict[str, list[str]] = {}
+
+
+def _pick_by_subtype(subtype: dict, n: int) -> str:
+    """按子类型均衡抽取：每类按条数分配额，相邻两条不同类，类内一轮不重复
+    subtype: {"状态型": [原句...], "观念型": [...], ...}"""
+    global _subtype_pools
+    classes = [c for c in SUBTYPE_NAMES if subtype.get(c)]
+    if not classes:
         return ""
+    counts = {c: len(subtype[c]) for c in classes}
+    # 配额：先均分，余数给条目多的类（保证每类都有份）
+    per, extra = divmod(n, len(classes))
+    quota = {c: per for c in classes}
+    for c in sorted(classes, key=lambda c: counts[c], reverse=True)[:extra]:
+        quota[c] += 1
+    # 每类池续用或初始化
+    for c in classes:
+        pool = _subtype_pools.get(c)
+        if not pool:
+            _subtype_pools[c] = subtype[c][:]
+    picked, last = [], None
+    while sum(quota.values()) > 0:
+        # 优先选一个还有配额且与上一条不同类的；无解时放宽
+        cands = [c for c in classes if quota[c] > 0 and c != last]
+        if not cands:
+            cands = [c for c in classes if quota[c] > 0]
+        if not cands:
+            break
+        c = random.choice(cands)
+        pool = _subtype_pools[c]
+        if not pool:
+            _subtype_pools[c] = subtype[c][:]  # 类内一轮取完，重建
+            pool = _subtype_pools[c]
+        picked.append(pool.pop())
+        quota[c] -= 1
+        last = c
     return "\n\n".join(f"【示例】\n{e[:MAX_ENTRY_CHARS]}" for e in picked)
 
 
+# 信任类主题指纹：样本里信任/托付类条目扎堆（用户发文习惯），
+# 示例若全抽到信任类，生成主题就会被带窄（总是"信任/靠谱"）。
+# 抽取后做浓度检查，超过一半命中就重抽，让示例主题摊开。
+TRUST_HINTS = ("信任", "托付", "辜负", "靠谱", "诚信", "守底线", "守护", "口碑", "真诚", "真心", "承诺", "放心")
+
+
+def _trust_ratio(text: str) -> float:
+    """粗略计算示例文本中信任类主题的占比（按条算，不按字数）"""
+    blocks = [b for b in re.split(r"\n\n【示例】", text) if b.strip()]
+    if not blocks:
+        return 0.0
+    hits = sum(1 for b in blocks if any(w in b for w in TRUST_HINTS))
+    return hits / len(blocks)
+
+
+def _pick_examples(n: int = ENTRY_COUNT, style: dict | None = None) -> str:
+    """抽取示例：画像带 subtype 时按类均衡抽；否则全池洗牌轮换（池空自动重建，一轮内不重复）
+    主题浓度检查：信任类占比 > 一半则重抽（最多 5 轮），避免生成主题被示例带窄"""
+    picked = ""
+    for _ in range(5):
+        if style and style.get("subtype"):
+            picked = _pick_by_subtype(style["subtype"], n)
+            if not picked:
+                return ""
+        else:
+            global _example_pool
+            if not _example_pool:
+                _refill_pool()
+            picked = []
+            while len(picked) < n and _example_pool:
+                picked.append(_example_pool.pop())
+            if not _example_pool:
+                _refill_pool()  # 预填充下一轮
+            if not picked:
+                return ""
+            picked = "\n\n".join(f"【示例】\n{e[:MAX_ENTRY_CHARS]}" for e in picked)
+        if _trust_ratio(picked) <= 0.5:
+            return picked
+    return picked  # 重试多轮仍超标（池子信任密度过高），退回最后一轮
+
+
 def _format_style(style: dict) -> str:
-    """把风格画像格式化为提示词文本"""
+    """把新画像（可执行数据）格式化为提示词文本"""
     lines = []
-    labels = {
-        "tone": "语气",
-        "vocabulary": "词汇偏好",
-        "sentence_style": "句式习惯",
-        "structure": "结构套路",
-        "title_style": "标题风格",
-        "length_guide": "篇幅与节奏",
-        "avoid": "要避免的",
-    }
-    for field in STYLE_FIELDS:
-        v = style.get(field)
-        if v and v != "（未提炼）":
-            lines.append(f"- {labels.get(field, field)}：{v}")
+    structure = style.get("structure")
+    if structure and structure != "（未提炼）":
+        lines.append(f"结构骨架：{structure}")
+    ex = style.get("structure_example")
+    if ex and ex != "（未提炼）":
+        lines.append(f"（原句例：{ex}）")
+
+    def fmt_templates(items, label):
+        items = items or []
+        if not items:
+            return
+        lines.append(f"{label}（参考库，按示例的多样性和频率取用，不要每篇套同一个模板）：")
+        # 低频句式（"不是…而是…"类）排到段尾，降低首要曝光
+        def is_low(it):
+            p = it.get("pattern", "") if isinstance(it, dict) else ""
+            return "不是" in p and "而是" in p
+        for it in sorted(items, key=is_low):
+            if not isinstance(it, dict):
+                continue
+            p, e = it.get("pattern", ""), it.get("example", "")
+            if p and e:
+                low = "（样本中低频，偶尔用）" if is_low(it) else ""
+                lines.append(f"- {p} {low}例：{e}")
+            elif p or e:
+                lines.append(f"- {p or e}")
+
+    fmt_templates(style.get("openings"), "开头句库")
+    fmt_templates(style.get("core_templates"), "观念主体句库")
+    fmt_templates(style.get("closings"), "收尾句库")
+
+    imagery = style.get("imagery") or []
+    if imagery:
+        lines.append("意象：")
+        for it in imagery:
+            if isinstance(it, dict):
+                d, e = it.get("domain", ""), it.get("examples", "")
+                if d or e:
+                    lines.append(f"- {d}：{e}" if d and e else f"- {d or e}")
+
+    anchors = style.get("tone_anchors") or []
+    if anchors:
+        lines.append("语气锚点原句：")
+        for a in anchors:
+            if a:
+                lines.append(f"- {a}")
+
+    fmt_templates(style.get("humor"), "幽默套路")
+
+    length = style.get("length")
+    if isinstance(length, dict) and length.get("min") is not None:
+        lines.append(f"篇幅：{length['min']}-{length['median']}-{length['max']} 字")
+
+    avoid = style.get("avoid")
+    if avoid and avoid != "（未提炼）":
+        lines.append(f"要避免的：{avoid}")
+
     return "\n".join(lines)
 
 
-SYSTEM_PROMPT_TMPL = """你是一位{identity}。你的任务是根据【风格画像】和【风格示例】，模仿其风格创作新的文案。
+# 两档风格模式的创作要求（沉淀的历次调优约束，两模板共用；动这里时两个模板都生效）
+CREATION_REQUIREMENTS = """创作要求：
+- 逐条细读示例，模仿它们说话的口吻、用词和句子的节奏；画像只是大方向，示例的味道优先
+- 可以借用示例中的句式结构和说话方式，但不要整句照抄
+- 本次文案的开头切入场景，以用户消息中指定的场景为准，必须围绕该场景展开，不得换成其他场景
+- 文案以经营日常、真实感受和人情味为主，像参考文本那样娓娓道来，不要围绕产品卖点堆砌
+- 感悟只写自己：写自己今天做了什么、身体和心里的状态，可以自嘲、可以说辛苦、可以讲原则；不要替客户或师傅下结论，不要出现"客户很满意""师傅夸""客户说好"这类他人评价
+- 文案的主体是观念和感悟（对生意、信任、坚持、品质、人情、时节的朴实判断），当天发生的事只做一两句引子，不要写事件流水账；主题面要宽：参考样本里写信任、写坚持、写品质、写时节节气、写节日祝福、写感恩致谢、写晚归自嘲都有，像那样换着角度写，这次写了信任，下次就换坚持或时节，不要每次生成都围着同一个主题打转；参考文本是"格言体"，判断句是它的底色，但句式要多样：样本 85 条里"不是……，而是……"只出现 6 条，"……，才是……"也只偶尔出现，绝大多数文案用的是平实的断言句——"不是……，而是……"句式本篇最多出现一次，多数时候不要使用，更不能连排两句；观念可以直接断言、白描或对比表达
+- 全程第一人称独白，像自言自语：不要借任何人之口说话（"师傅说""客户说"这类一律禁止），不要对"你"喊话，不要写"你…我…"对仗或任何广告式金句
+- 如需提到产品，只用泛称（如"这批砖""咱家的砖""今天送的那车货"），绝不出现具体产品名、系列名、花色名、型号或参数
+- 篇幅长短向示例看齐，别写太长或太短
+- 只输出文案正文本身，不要任何解释说明
+- 不要出现"风格画像""示例"等字眼"""
+
+
+# ==========================================
+# 风格模式：画像 v2 重构后缩成两档
+# style: 新画像（三段句库/意象/锚点/humor）+ 6 条按子类型均衡抽的示例 + 温度 0.7（推荐，默认）
+# none:  去画像，仅示例原文 + 温度 1.0
+# ==========================================
+STYLE_MODES = {
+    "style": {"label": "风格画像", "entry_count": 6, "temperature": 0.7},
+    "none": {"label": "仅示例", "entry_count": 6, "temperature": 1.0},
+}
+
+# style 模式：可执行画像 + 子类型均衡示例
+PROMPT_STYLE_TMPL = """你是一位{identity}。你的任务是根据下面的【风格画像】和【风格示例】，模仿其风格创作新的文案。
 
 【风格画像】
 {style}
@@ -147,31 +275,7 @@ SYSTEM_PROMPT_TMPL = """你是一位{identity}。你的任务是根据【风格�
 【风格示例】
 {examples}
 
-创作要求：
-- 严格遵循风格画像中的语气、词汇、句式、结构，不要偏离
-- 风格示例只用于学习语气、用词、句式节奏，绝不照抄示例中的句子、产品名、具体场景或比喻
-- 本次文案的开头切入场景，以用户消息中指定的场景为准，必须围绕该场景展开，不得换成其他场景
-- 文案以经营日常、真实感受和人情味为主，像参考文本那样娓娓道来，不要围绕产品卖点堆砌
-- 感悟只写自己：写自己今天做了什么、身体和心里的状态，可以自嘲、可以说辛苦、可以讲原则；不要替客户或师傅下结论，不要出现"客户很满意""师傅夸""客户说好"这类他人评价
-- 文案的主体是观念和感悟（对生意、信任、坚持的朴实断言），当天发生的事只做一两句引子，不要写事件流水账；参考文本是"格言体"，多用"不是……，而是……""……，才是……"这类判断句
-- 全程第一人称独白，像自言自语：不要借任何人之口说话（"师傅说""客户说"这类一律禁止），不要对"你"喊话，不要写"你…我…"对仗或任何广告式金句
-- 如需提到产品，只用泛称（如"这批砖""咱家的砖""今天送的那车货"），绝不出现具体产品名、系列名、花色名、型号或参数
-- 只输出文案正文本身，不要任何解释说明
-- 不要出现"风格画像""示例"等字眼
-"""
-
-
-# ==========================================
-# 风格模式：A/B 实验产物（人味排查结论：画像越抽象，人味越少）
-# full: 完整 7 维画像 + 3 条示例 + 温度 1.0（原方案）
-# none: 去画像，仅示例原文 + 温度 1.0
-# slim: 精简画像(tone/avoid) + 6 条示例 + 温度 0.7（推荐，默认）
-# ==========================================
-STYLE_MODES = {
-    "full": {"label": "完整画像", "entry_count": 3, "temperature": 1.0},
-    "none": {"label": "仅示例", "entry_count": 6, "temperature": 1.0},
-    "slim": {"label": "精简画像", "entry_count": 6, "temperature": 0.7},
-}
+""" + CREATION_REQUIREMENTS
 
 # none 模式：画像彻底退场，示例原文是唯一风格来源
 PROMPT_NONE_TMPL = """你是一位{identity}。你的任务是根据【风格示例】，模仿其口吻创作新的文案。
@@ -179,39 +283,7 @@ PROMPT_NONE_TMPL = """你是一位{identity}。你的任务是根据【风格示
 【风格示例】
 {examples}
 
-创作要求：
-- 风格示例是唯一的风格来源：逐条仔细读，模仿它们说话的口吻、用词和句子的节奏
-- 可以借用示例中的句式结构和说话方式，但不要整句照抄
-- 本次文案的开头切入场景，以用户消息中指定的场景为准，必须围绕该场景展开，不得换成其他场景
-- 文案以经营日常、真实感受和人情味为主，像参考文本那样娓娓道来，不要围绕产品卖点堆砌
-- 感悟只写自己：写自己今天做了什么、身体和心里的状态，可以自嘲、可以说辛苦、可以讲原则；不要替客户或师傅下结论，不要出现"客户很满意""师傅夸""客户说好"这类他人评价
-- 文案的主体是观念和感悟（对生意、信任、坚持的朴实断言），当天发生的事只做一两句引子，不要写事件流水账；参考文本是"格言体"，多用"不是……，而是……""……，才是……"这类判断句
-- 全程第一人称独白，像自言自语：不要借任何人之口说话（"师傅说""客户说"这类一律禁止），不要对"你"喊话，不要写"你…我…"对仗或任何广告式金句
-- 如需提到产品，只用泛称（如"这批砖""咱家的砖""今天送的那车货"），绝不出现具体产品名、系列名、花色名、型号或参数
-- 只输出文案正文本身，不要任何解释说明
-"""
-
-# slim 模式：画像只留 tone/avoid 两行当大方向，细节以示例为准
-PROMPT_SLIM_TMPL = """你是一位{identity}。你的任务是根据下面的【风格画像】和【风格示例】，模仿其风格创作新的文案。
-
-【风格画像】（只是大方向提示，细节以示例为准）
-{tone}
-{avoid}
-
-【风格示例】
-{examples}
-
-创作要求：
-- 逐条细读示例，模仿它们说话的口吻、用词和句子的节奏；画像只是大方向，示例的味道优先
-- 可以借用示例中的句式结构和说话方式，但不要整句照抄
-- 本次文案的开头切入场景，以用户消息中指定的场景为准，必须围绕该场景展开，不得换成其他场景
-- 文案以经营日常、真实感受和人情味为主，像参考文本那样娓娓道来，不要围绕产品卖点堆砌
-- 感悟只写自己：写自己今天做了什么、身体和心里的状态，可以自嘲、可以说辛苦、可以讲原则；不要替客户或师傅下结论，不要出现"客户很满意""师傅夸""客户说好"这类他人评价
-- 文案的主体是观念和感悟（对生意、信任、坚持的朴实断言），当天发生的事只做一两句引子，不要写事件流水账；参考文本是"格言体"，多用"不是……，而是……""……，才是……"这类判断句
-- 全程第一人称独白，像自言自语：不要借任何人之口说话（"师傅说""客户说"这类一律禁止），不要对"你"喊话，不要写"你…我…"对仗或任何广告式金句
-- 如需提到产品，只用泛称（如"这批砖""咱家的砖""今天送的那车货"），绝不出现具体产品名、系列名、花色名、型号或参数
-- 只输出文案正文本身，不要任何解释说明
-"""
+""" + CREATION_REQUIREMENTS
 
 
 # 画像缺失 identity 时的兜底身份（兼容旧画像文件）
@@ -235,16 +307,10 @@ def _get_identity(style: dict | None) -> str:
 def _build_system_prompt(mode: str, style: dict | None, examples: str) -> str:
     """按风格模式组装 system prompt"""
     identity = _get_identity(style)
-    if mode == "full":
-        style_text = _format_style(style) if style else "（未提供画像，请参考示例的通用营销风格）"
-        return SYSTEM_PROMPT_TMPL.format(identity=identity, style=style_text, examples=examples)
     if mode == "none":
         return PROMPT_NONE_TMPL.format(identity=identity, examples=examples)
-    tone = style.get("tone") if style else None
-    avoid = style.get("avoid") if style else None
-    tone_line = f"- 语气：{tone}" if tone and tone != "（未提炼）" else "- 语气：真诚质朴、不端着"
-    avoid_line = f"- 要避免的：{avoid}" if avoid and avoid != "（未提炼）" else ""
-    return PROMPT_SLIM_TMPL.format(identity=identity, tone=tone_line, avoid=avoid_line, examples=examples)
+    style_text = _format_style(style) if style else "（未提供画像）"
+    return PROMPT_STYLE_TMPL.format(identity=identity, style=style_text, examples=examples)
 
 
 # ==========================================
@@ -279,7 +345,7 @@ def build_topic(input_text: str) -> str:
     return resp.content.strip()
 
 
-def generate_stream(text_type: str, style: dict | None = None, style_mode: str = "slim", topic: str | None = None):
+def generate_stream(text_type: str, style: dict | None = None, style_mode: str = "style", topic: str | None = None):
     """按类型生成文案，返回 token 迭代器（流式）
     topic: 用户输入"今天干了什么"生成的主题；为空时走随机场景池兜底
     """
@@ -290,13 +356,16 @@ def generate_stream(text_type: str, style: dict | None = None, style_mode: str =
         raise ValueError(f"未知风格模式: {style_mode}")
 
     style = style or load_style()
-    examples = _pick_examples(n=mode["entry_count"])
+    examples = _pick_examples(n=mode["entry_count"], style=style)
     if not examples:
         examples = "（无示例样本）"
 
-    # 有主题用主题，没有则注入随机开场场景（避免模型凭先验选同一个开场）
+    # 有主题用主题；无主题时：朋友圈走"纯感悟"模式（参考样本里大量无场景的纯感悟文案，
+    # 不硬塞场景），小红书/销售话术仍走随机场景池（种草/话术需要具体场景支撑）
     if topic and topic.strip():
         scene_text, scene_instr = topic.strip(), "文案必须围绕这个主题展开，以它为核心，不得更换或另起场景。"
+    elif text_type == "wechat_moment":
+        scene_text, scene_instr = "（不限定场景）", "本次不限定具体场景：像参考样本中的纯感悟文案那样（如'信任这东西很珍贵，一旦给了，就不能辜负''该和深夜和解了，它见证了我的努力和成长''在平凡的日常里坚守热爱'），直接写一段道理或感悟，主体是观念和感悟；主题面要宽，信任、坚持、品质、时节、感恩、自嘲都可以，换着角度写，不要每次都是同一个主题；最多带一句经营日常做引子，不要编造具体事件流水账。"
     else:
         scene_text, scene_instr = _pick_scene(), "文案必须从这个场景切入展开，不得更换。"
     requirement = TYPES[text_type]["requirement"] + f"\n\n【本次主题】{scene_text}\n{scene_instr}"
