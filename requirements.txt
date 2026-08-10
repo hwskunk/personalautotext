@@ -1,0 +1,17 @@
+# ==========================================
+# personalaitext — 瓷砖文案风格生成器 依赖清单
+# 使用 rag_env 环境
+# ==========================================
+
+# Web 服务（FastAPI + Uvicorn）
+fastapi>=0.139.0
+uvicorn[standard]>=0.46.0
+python-multipart>=0.0.28
+sse-starlette>=3.4.4
+
+# LangChain + DashScope 兼容模式
+langchain>=1.2.0
+langchain-openai>=1.2.0
+
+# 工具
+python-dotenv>=1.2.0

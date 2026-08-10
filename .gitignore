@@ -1,0 +1,16 @@
+# 环境变量（含 API Key，绝不上传）
+.env
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# 系统文件
+Thumbs.db
+.DS_Store
+
+# 临时文件
+*.log
+tmp/

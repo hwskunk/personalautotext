@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>瓷砖文案生成器</title>
+<style>
+  /* ========== 釉面与色卡：瓷砖文案生成器 ========== */
+  :root {
+    --bg: #F3F0EA;          /* 坯体暖灰 */
+    --bg-card: #FBF9F5;     /* 米白釉面 */
+    --line: #E1DCD2;        /* 砖缝线 */
+    --ink: #2B2B28;         /* 墨灰文字 */
+    --ink-soft: #6E6A61;    /* 次级文字 */
+    --glaze: #1F6E68;       /* 釉青主色 */
+    --glaze-deep: #175852;  /* 深釉 */
+    --glaze-soft: #DCEDE9;  /* 釉青浅底 */
+    --warn: #B4552D;        /* 陶土橙（小面积警示） */
+    --shadow: 0 1px 2px rgba(43,43,40,.05), 0 4px 16px rgba(43,43,40,.06);
+    --radius: 10px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* 背景：淡砖缝网格 */
+  body::before {
+    content: "";
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 44px 44px;
+    opacity: .45;
+  }
+
+  .wrap {
+    position: relative; z-index: 1;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 48px 20px 72px;
+  }
+
+  /* ---------- 头部 ---------- */
+  header { margin-bottom: 36px; }
+  .eyebrow {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; letter-spacing: .18em;
+    color: var(--ink-soft); margin-bottom: 12px;
+  }
+  .eyebrow::before {
+    content: ""; width: 14px; height: 14px;
+    background: linear-gradient(135deg, var(--glaze) 50%, var(--glaze-deep) 50%);
+    border-radius: 2px; transform: rotate(45deg);
+  }
+  h1 {
+    margin: 0 0 6px;
+    font-size: 32px; font-weight: 800; letter-spacing: .02em;
+  }
+  .sub { margin: 0; color: var(--ink-soft); font-size: 14px; }
+
+  /* ---------- 步骤面板 ---------- */
+  .panel {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 22px 24px 24px;
+    margin-bottom: 20px;
+  }
+  .step-head {
+    display: flex; align-items: baseline; gap: 12px;
+    margin-bottom: 14px;
+  }
+  .step-no {
+    font-size: 13px; font-weight: 700;
+    color: var(--bg-card);
+    background: var(--glaze);
+    border-radius: 4px;
+    padding: 1px 8px;
+    letter-spacing: .06em;
+  }
+  .step-title { font-size: 17px; font-weight: 700; margin: 0; }
+  .step-hint { margin-left: auto; font-size: 12px; color: var(--ink-soft); }
+
+  /* ---------- 上传区 ---------- */
+  .dropzone {
+    border: 1.5px dashed var(--line);
+    border-radius: var(--radius);
+    padding: 26px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .dropzone:hover, .dropzone.drag { border-color: var(--glaze); background: var(--glaze-soft); }
+  .dropzone p { margin: 0; font-size: 14px; }
+  .dropzone .small { font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
+  .dropzone input { display: none; }
+
+  /* 样本瓷砖卡片 */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 16px; }
+  .tile {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--bg-card);
+    cursor: pointer;
+    transition: box-shadow .15s, transform .15s;
+    position: relative;
+  }
+  .tile:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+  .tile .swatch {
+    height: 10px; border-radius: 3px; margin-bottom: 8px;
+  }
+  .tile .fname {
+    font-size: 12.5px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tile .fmeta { font-size: 11px; color: var(--ink-soft); }
+  .tile .remove {
+    position: absolute; top: 6px; right: 8px;
+    border: none; background: none; cursor: pointer;
+    color: var(--ink-soft); font-size: 13px; line-height: 1;
+    padding: 2px 4px; border-radius: 4px;
+  }
+  .tile .remove:hover { color: var(--warn); background: rgba(180,85,45,.08); }
+
+  /* 样本预览 */
+  .preview {
+    margin-top: 10px; padding: 12px 14px;
+    background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px;
+    font-size: 13px; white-space: pre-wrap;
+    max-height: 220px; overflow: auto;
+    display: none;
+  }
+  .preview.show { display: block; }
+
+  .empty-tip { font-size: 13px; color: var(--ink-soft); margin-top: 12px; }
+
+  /* ---------- 按钮 ---------- */
+  .btn {
+    appearance: none; border: none; cursor: pointer;
+    font-family: inherit; font-size: 14px; font-weight: 600;
+    border-radius: 8px;
+    padding: 10px 20px;
+    transition: background .2s, transform .1s, box-shadow .2s;
+    outline-offset: 2px;
+  }
+  .btn:focus-visible { outline: 2px solid var(--glaze); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
+  .btn-primary {
+    color: #fff;
+    background: linear-gradient(120deg, var(--glaze), var(--glaze-deep));
+    position: relative; overflow: hidden;
+  }
+  /* 釉面流光：hover 时一道光泽扫过 */
+  .btn-primary::after {
+    content: "";
+    position: absolute; top: 0; left: -80%; width: 60%; height: 100%;
+    background: linear-gradient(105deg, transparent, rgba(255,255,255,.35), transparent);
+    transform: skewX(-20deg);
+    transition: left .55s ease;
+  }
+  .btn-primary:hover:not(:disabled)::after { left: 120%; }
+  .btn-primary:hover:not(:disabled) { box-shadow: 0 4px 14px rgba(31,110,104,.3); }
+
+  .btn-ghost {
+    background: transparent; color: var(--glaze-deep);
+    border: 1.5px solid var(--glaze);
+  }
+  .btn-ghost:hover:not(:disabled) { background: var(--glaze-soft); }
+
+  .btn-row { display: flex; flex-wrap: wrap; gap: 10px; }
+
+  /* ---------- 风格模式切换 ---------- */
+  .mode-row { margin-top: 4px; align-items: center; }
+  .mode-label {
+    font-size: 13px; color: var(--ink-soft); font-weight: 600; margin-right: 2px;
+  }
+  .mode-btn { padding: 6px 14px; font-size: 13px; border-radius: 999px; font-weight: 500; }
+  .mode-btn.mode-active {
+    background: var(--glaze); color: #fff; border-color: var(--glaze);
+  }
+
+  /* ---------- 行业输入区 ---------- */
+  .industry-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 2px; }
+  .industry-row .topic-input { flex: 1; padding: 7px 12px; font-size: 13px; }
+
+  /* ---------- 主题输入区 ---------- */
+  .topic-box { margin: 2px 0 14px; display: flex; flex-direction: column; gap: 8px; }
+  .topic-row { display: flex; gap: 10px; }
+  .topic-input {
+    flex: 1; font-family: inherit; font-size: 14px; color: var(--ink);
+    background: #fff; border: 1.5px solid var(--glaze-soft);
+    border-radius: 8px; padding: 9px 12px; outline-offset: 2px;
+  }
+  .topic-input:focus { border-color: var(--glaze); }
+  .topic-area {
+    font-family: inherit; font-size: 14px; color: var(--ink); line-height: 1.6;
+    background: var(--glaze-soft); border: 1.5px dashed var(--glaze);
+    border-radius: 8px; padding: 10px 12px; resize: vertical;
+    width: 100%; box-sizing: border-box; outline-offset: 2px;
+  }
+  .topic-area:focus { border-color: var(--glaze); border-style: solid; }
+
+  /* ---------- 画像摘要 ---------- */
+  .style-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .style-cell {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12.5px;
+  }
+  .style-cell .k { font-weight: 700; color: var(--glaze-deep); margin-bottom: 2px; }
+  .style-cell .v { color: var(--ink); }
+  .style-meta { font-size: 11.5px; color: var(--ink-soft); margin-top: 10px; }
+
+  /* ---------- 输出区 ---------- */
+  .output {
+    margin-top: 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg);
+    padding: 16px 18px;
+    min-height: 120px;
+    font-size: 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: none;
+  }
+  .output.show { display: block; }
+  .output .type-tag {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    color: var(--glaze-deep); background: var(--glaze-soft);
+    border-radius: 4px; padding: 1px 8px; margin-bottom: 8px;
+    letter-spacing: .05em;
+  }
+  .output .body { line-height: 1.75; }
+  .caret { display: inline-block; width: 2px; height: 1em; background: var(--glaze); vertical-align: -2px; margin-left: 1px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .output.error { border-color: var(--warn); color: #8A3D1E; }
+
+  .foot { margin-top: 28px; text-align: center; }
+  .link-reset {
+    border: none; background: none; cursor: pointer;
+    color: var(--ink-soft); font-size: 12px; text-decoration: underline;
+    font-family: inherit;
+  }
+  .link-reset:hover { color: var(--warn); }
+
+  /* ---------- 响应与可访问性 ---------- */
+  @media (max-width: 600px) {
+    .wrap { padding: 28px 14px 48px; }
+    h1 { font-size: 26px; }
+    .style-grid { grid-template-columns: 1fr; }
+    .step-hint { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .btn-primary::after { transition: none; left: 0; display: none; }
+    .caret { animation: none; }
+    .tile { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">TILE&nbsp;COPY&nbsp;STUDIO</div>
+    <h1>瓷砖文案生成器</h1>
+    <p class="sub">上传你喜欢的文案，AI 提炼风格，一键生成新文案。</p>
+  </header>
+
+  <!-- 步骤 1：样本上传 -->
+  <section class="panel">
+    <div class="step-head">
+      <span class="step-no">1</span>
+      <h2 class="step-title">上传样本</h2>
+      <span class="step-hint">支持 .txt / .md，可多选</span>
+    </div>
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="选择样本文本文件">
+      <p>把文案文件拖到这里，或 <u>点击选择</u></p>
+      <p class="small">样本越有代表性，生成的文案越贴风格</p>
+      <input type="file" id="fileInput" multiple accept=".txt,.md">
+    </div>
+    <div class="industry-row">
+      <label class="mode-label" for="industryInput">行业（选填，用于生成角色身份）</label>
+      <input id="industryInput" class="topic-input" placeholder="例：瓷砖，留空默认瓷砖" maxlength="20">
+    </div>
+    <div class="tiles" id="tiles"></div>
+    <div class="preview" id="preview"></div>
+    <p class="empty-tip" id="sampleEmpty">还没有样本，先上传几篇文案。</p>
+  </section>
+
+  <!-- 步骤 2：风格画像 -->
+  <section class="panel">
+    <div class="step-head">
+      <span class="step-no">2</span>
+      <h2 class="step-title">生成画像</h2>
+      <span class="step-hint" id="styleHint">基于全部样本提炼</span>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="buildBtn">生成画像</button>
+    </div>
+    <div id="styleArea" style="margin-top:14px;"></div>
+  </section>
+
+  <!-- 步骤 3：生成文案 -->
+  <section class="panel">
+    <div class="step-head">
+      <span class="step-no">3</span>
+      <h2 class="step-title">生成文案</h2>
+      <span class="step-hint" id="genHint">点击一种类型，流式输出</span>
+    </div>
+    <div class="topic-box">
+      <label class="mode-label" for="topicInput">今天干了什么（选填，不填则随机场景）</label>
+      <div class="topic-row">
+        <input id="topicInput" class="topic-input" placeholder="例：给客户送砖上门，客户很满意" maxlength="100">
+        <button class="btn btn-ghost" id="topicBtn">生成主题</button>
+      </div>
+      <textarea id="topicArea" class="topic-area" rows="2" placeholder="主题生成后显示在这里，可直接修改"></textarea>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" data-type="xiaohongshu">小红书种草</button>
+      <button class="btn btn-primary" data-type="wechat_moment">朋友圈短文案</button>
+      <button class="btn btn-primary" data-type="sales_script">销售话术</button>
+    </div>
+    <div class="btn-row mode-row">
+      <span class="mode-label">风格模式</span>
+      <button class="btn btn-ghost mode-btn" data-mode="full">完整画像</button>
+      <button class="btn btn-ghost mode-btn" data-mode="none">仅示例</button>
+      <button class="btn btn-ghost mode-btn mode-active" data-mode="slim">精简画像·推荐</button>
+    </div>
+    <div class="output" id="output"></div>
+  </section>
+
+  <div class="foot">
+    <button class="link-reset" id="resetBtn">清空样本与画像</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const dropzone = $('dropzone'), fileInput = $('fileInput'), tiles = $('tiles'),
+        preview = $('preview'), sampleEmpty = $('sampleEmpty'),
+        buildBtn = $('buildBtn'), styleArea = $('styleArea'), styleHint = $('styleHint'),
+        output = $('output'), genHint = $('genHint'), resetBtn = $('resetBtn');
+
+  // 样本瓷片用的一组釉色（按文件名取色）
+  const SWATCHES = ['#1F6E68','#B4552D','#6B7A52','#4A6375','#9A6B4F','#5D5A78','#8A5630','#3D6B61'];
+  const hash = (s) => [...s].reduce((a, c) => (a * 31 + c.codePointAt(0)) % 997, 7);
+  const fmtSize = (n) => n > 1024 ? (n/1024).toFixed(1) + ' KB' : n + ' B';
+
+  let state = { sample_count: 0, style_built: false, style: null, samples: [] };
+
+  /* ---------- 状态 ---------- */
+  async function refresh() {
+    const res = await fetch('/api/status');
+    state = await res.json();
+    renderSamples(); renderStyle();
+    buildBtn.disabled = state.sample_count === 0;
+    genHint.textContent = state.style_built ? '画像就绪，点击生成' : '请先完成步骤 1 和 2';
+  }
+
+  /* ---------- 样本渲染 ---------- */
+  function renderSamples() {
+    tiles.innerHTML = '';
+    sampleEmpty.style.display = state.samples.length ? 'none' : 'block';
+    state.samples.forEach(s => {
+      const el = document.createElement('div');
+      el.className = 'tile';
+      el.title = '点击查看内容';
+      el.innerHTML = `
+        <div class="swatch" style="background:${SWATCHES[hash(s.name) % SWATCHES.length]}"></div>
+        <div class="fname">${escapeHtml(s.name)}</div>
+        <div class="fmeta">${fmtSize(s.size)} · ${s.mtime}</div>`;
+      el.addEventListener('click', () => togglePreview(s.name));
+      tiles.appendChild(el);
+    });
+  }
+
+  async function togglePreview(name) {
+    if (preview.style.display === 'block' && preview.dataset.name === name) {
+      preview.classList.remove('show'); return;
+    }
+    const res = await fetch('/api/sample?name=' + encodeURIComponent(name));
+    const data = await res.json();
+    if (data.ok) {
+      preview.dataset.name = name;
+      preview.textContent = data.content;
+      preview.classList.add('show');
+    }
+  }
+
+  /* ---------- 画像渲染 ---------- */
+  const STYLE_LABELS = {
+    identity:'身份', tone:'语气', vocabulary:'词汇偏好', sentence_style:'句式习惯',
+    structure:'结构套路', title_style:'标题风格', length_guide:'篇幅与节奏', avoid:'要避免的'
+  };
+  function renderStyle() {
+    styleArea.innerHTML = '';
+    styleHint.textContent = '基于全部样本提炼';
+    if (!state.style) {
+      styleArea.innerHTML = `<p class="empty-tip">画像未生成。上传样本后点击「生成画像」，AI 会提炼这套文案的风格。</p>`;
+      return;
+    }
+    const s = state.style;
+    const grid = document.createElement('div');
+    grid.className = 'style-grid';
+    Object.entries(STYLE_LABELS).forEach(([k, label]) => {
+      const v = s[k];
+      if (!v || v === '（未提炼）') return;
+      const cell = document.createElement('div');
+      cell.className = 'style-cell';
+      cell.innerHTML = `<div class="k">${label}</div><div class="v">${escapeHtml(v)}</div>`;
+      grid.appendChild(cell);
+    });
+    styleArea.appendChild(grid);
+    const meta = document.createElement('div');
+    meta.className = 'style-meta';
+    meta.textContent = `基于 ${s.sample_count ?? '?'} 篇样本 · ${s.source_files?.join('、') ?? ''} · ${s.built_at ?? ''}`;
+    styleArea.appendChild(meta);
+    styleHint.textContent = '画像已就绪，可重复使用';
+  }
+
+  /* ---------- 上传 ---------- */
+  function uploadFiles(fileList) {
+    if (!fileList.length) return;
+    const fd = new FormData();
+    [...fileList].forEach(f => fd.append('files', f));
+    const btn = dropzone.querySelector('p');
+    btn.textContent = '上传中…';
+    fetch('/api/upload', { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(d => { alert(d.message); refresh(); })
+      .catch(e => alert('上传失败：' + e.message))
+      .finally(() => { btn.innerHTML = '把文案文件拖到这里，或 <u>点击选择</u>'; fileInput.value = ''; });
+  }
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+  fileInput.addEventListener('change', () => uploadFiles(fileInput.files));
+  ['dragover','dragenter'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('drag'); }));
+  ['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('drag'); }));
+  dropzone.addEventListener('drop', e => uploadFiles(e.dataTransfer.files));
+
+  /* ---------- 生成画像 ---------- */
+  buildBtn.addEventListener('click', async () => {
+    buildBtn.disabled = true;
+    buildBtn.textContent = '画像生成中…';
+    try {
+      const res = await fetch('/api/build_style', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ industry: $('industryInput').value.trim() })
+      });
+      const d = await res.json();
+      if (d.ok) { state.style = d.style; state.style_built = true; renderStyle(); }
+      else alert('生成失败：' + d.message);
+    } catch (e) { alert('生成失败：' + e.message); }
+    finally { buildBtn.disabled = state.sample_count === 0; buildBtn.textContent = '生成画像'; refresh(); }
+  });
+
+  /* ---------- 主题层：今天干了什么 → 主题 ---------- */
+  const topicInput = $('topicInput'), topicBtn = $('topicBtn'), topicArea = $('topicArea');
+  topicBtn.addEventListener('click', async () => {
+    const text = topicInput.value.trim();
+    if (!text) { alert('先输入今天干了什么'); return; }
+    topicBtn.disabled = true;
+    topicBtn.textContent = '主题生成中…';
+    try {
+      const res = await fetch('/api/build_topic', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      const d = await res.json();
+      if (d.ok) topicArea.value = d.topic;
+      else alert('主题生成失败：' + d.message);
+    } catch (e) {
+      alert('主题生成失败：' + e.message);
+    }
+    topicBtn.disabled = false;
+    topicBtn.textContent = '生成主题';
+  });
+
+  /* ---------- 风格模式切换 ---------- */
+  let styleMode = 'slim';
+  const modeBtns = [...document.querySelectorAll('.mode-btn')];
+  modeBtns.forEach(m => m.addEventListener('click', () => {
+    styleMode = m.dataset.mode;
+    modeBtns.forEach(x => x.classList.toggle('mode-active', x === m));
+  }));
+
+  /* ---------- 生成文案（SSE 流式） ---------- */
+  const genBtns = [...document.querySelectorAll('[data-type]')];
+  let streaming = false;
+
+  function showOutput() {
+    output.classList.add('show');
+    output.classList.remove('error');
+    output.innerHTML = '';
+  }
+  function appendCaret() {
+    const c = document.createElement('span');
+    c.className = 'caret';
+    output.appendChild(c);
+    return c;
+  }
+
+  genBtns.forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (streaming) return;
+      streaming = true;
+      genBtns.forEach(b => b.disabled = true);
+      modeBtns.forEach(b => b.disabled = true);
+      topicBtn.disabled = true;
+      const type = btn.dataset.type;
+      const tag = document.createElement('div');
+      tag.className = 'type-tag';
+      tag.textContent = btn.textContent;
+      showOutput();
+      output.appendChild(tag);
+      const body = document.createElement('div');
+      body.className = 'body';
+      output.appendChild(body);
+      const caret = appendCaret();
+
+      try {
+        const payload = { type, style_mode: styleMode };
+        const topic = topicArea.value.trim();
+        if (topic) payload.topic = topic;
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok || !res.body) throw new Error('请求失败 ' + res.status);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const frames = buf.split('\n\n');
+          buf = frames.pop();
+          for (const frame of frames) {
+            const line = frame.trim().replace(/^data:\s*/, '');
+            if (!line) continue;
+            const ev = JSON.parse(line);
+            if (ev.type === 'delta') {
+              body.textContent += ev.content;
+              body.scrollTop = 0;
+              output.scrollIntoView({ block: 'nearest' });
+            } else if (ev.type === 'done') {
+              caret.remove();
+            } else if (ev.type === 'error') {
+              output.classList.add('error');
+              body.textContent = '生成失败：' + ev.message;
+              caret.remove();
+            }
+          }
+        }
+      } catch (e) {
+        caret.remove();
+        output.classList.add('error');
+        body.textContent = '生成失败：' + e.message;
+      }
+      streaming = false;
+      genBtns.forEach(b => b.disabled = false);
+      modeBtns.forEach(b => b.disabled = false);
+      topicBtn.disabled = false;
+    });
+  });
+
+  /* ---------- 重置 ---------- */
+  resetBtn.addEventListener('click', async () => {
+    if (!confirm('确定清空所有样本和风格画像吗？')) return;
+    const d = await fetch('/api/reset', { method: 'DELETE' }).then(r => r.json());
+    alert(d.message);
+    preview.classList.remove('show');
+    refresh();
+  });
+
+  /* ---------- 工具 ---------- */
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  refresh();
+})();
+</script>
+</body>
+</html>
