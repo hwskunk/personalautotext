@@ -26,7 +26,8 @@ def _sse(payload: dict) -> str:
 
 @app.get("/")
 async def index():
-    return FileResponse(BASE_DIR / "static" / "index.html")
+    # no-cache：开发期前端频繁改动，避免浏览器缓存旧页面（看不到新功能）
+    return FileResponse(BASE_DIR / "static" / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/sample")
@@ -49,6 +50,7 @@ async def status():
     return {
         "sample_count": len(samples),
         "samples": samples,
+        "archived": style_manager.list_archived(),
         "style_built": style is not None,
         "style": style,
     }
@@ -75,6 +77,39 @@ async def build_style(request: Request):
     except Exception as e:
         logger.exception("构建画像失败")
         return JSONResponse(status_code=500, content={"ok": False, "message": str(e)})
+
+
+@app.delete("/api/sample")
+async def delete_sample(name: str):
+    """移除单个样本：移入归档目录，不真删、可恢复；移除后不再参与画像生成与示例抽取"""
+    ok = style_manager.delete_sample(name)
+    if not ok:
+        return JSONResponse(status_code=404, content={"ok": False, "message": "文件不存在或格式不支持"})
+    generator.reset_pools()  # 清示例池缓存，下次生成重新读取 data/
+    total = len(style_manager.list_samples())
+    msg = f"已移除参考文档：{name}"
+    if total == 0:
+        style_manager.clear_style()  # 没有生效样本了，画像一并清掉
+        msg += "；已无生效样本，画像已重置"
+    return {"ok": True, "message": msg, "total": total, "archived": style_manager.list_archived()}
+
+
+@app.get("/api/archived")
+async def archived():
+    """列出已移出（归档）的样本"""
+    return {"ok": True, "archived": style_manager.list_archived()}
+
+
+@app.post("/api/restore")
+async def restore(request: Request):
+    """把归档样本移回生效目录"""
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    ok = style_manager.restore_sample(name)
+    if not ok:
+        return JSONResponse(status_code=400, content={"ok": False, "message": "恢复失败：文件不存在，或同名文件已在生效目录"})
+    generator.reset_pools()
+    return {"ok": True, "message": f"已恢复：{name}", "archived": style_manager.list_archived()}
 
 
 @app.delete("/api/reset")

@@ -24,8 +24,9 @@ personalaitext/
 ├── style_manager.py  # 样本管理 + 画像 v2 构建（LLM 一次调用 + 程序统计 → style/tile_style.json）
 ├── llm.py            # LLM 封装（ChatOpenAI 直连 DashScope 兼容接口）
 ├── config.py         # 路径、模型、API key 读取
-├── data/             # 上传的参考样本文本（.txt/.md），当前 85 条瓷砖朋友圈文案（1 个文件）
-├── style/tile_style.json  # 画像 v2（可执行数据）
+├── data/             # 上传的参考样本文本（.txt/.md），当前 41 条插画师朋友圈文案
+│   └── _archive/     # 已移出的参考文档（归档，不真删、可恢复，见 5.4）
+├── style/tile_style.json  # 画像 v2（可执行数据；构建产物，git 已忽略）
 ├── static/index.html      # 前端单页
 ├── requirements.txt
 ├── .env              # ⚠️ 含 DASHSCOPE_API_KEY，绝不上传 git、绝不读取内容
@@ -74,12 +75,15 @@ personalaitext/
 
 | 接口 | 方法 | 作用 |
 |---|---|---|
-| `/` | GET | 前端页面 |
-| `/api/status` | GET | 样本数 + 画像是否存在 + 画像全文 |
+| `/` | GET | 前端页面（带 `Cache-Control: no-cache`，开发期避免缓存旧页面） |
+| `/api/status` | GET | 样本数 + 画像是否存在 + 画像全文 + `archived` 归档列表 |
 | `/api/upload` | POST | 上传样本（.txt/.md） |
 | `/api/build_style` | POST | 生成画像 v2，body `{industry}` |
 | `/api/build_topic` | POST | 主题层，body `{text}` |
 | `/api/generate` | POST | SSE 生成，body `{type, style_mode, topic}` |
+| `/api/sample` | DELETE | **移除样本**（移入 `data/_archive/`，不真删；清示例池缓存；移除后 0 样本则清画像） |
+| `/api/archived` | GET | 列出归档样本 |
+| `/api/restore` | POST | 把归档样本移回 `data/`（同名冲突时拒绝），body `{name}` |
 | `/api/reset` | DELETE | 清空样本 + 画像 |
 
 ## 4. 开发历程与调优结论（重要！都是血泪教训）
@@ -101,6 +105,7 @@ personalaitext/
 | 换行业出现"砖" | 样本本身是瓷砖文案（示例池实时从样本抽），非代码问题 | 用户确认问题不大，未改代码 |
 | "不是…而是…"每篇必用 | 3 层 prompt 硬编码 + qwen 强先验 | 弱化措辞 + 频率数字 + 低频标注 + 模板后置，压到多数篇 0 次；**换 deepseek-v4-pro 后 5 条全达标**（见 4.3） |
 | 生成主题趋同（总写信任/晚归，"晨光破云开"开头连撞） | qwen 对"朋友圈营销"先验极强，软指令压不过；我的 prompt 还把"信任"当唯一示范词反复出现 | ① prompt 摘"信任"唯一示范位 →"主题面要宽"列举多主题；② tone_anchors 手动改为主题分散 3 条 + 分析 prompt 加"主题必须分散"；③ 示例抽取加信任浓度检查 `_trust_ratio`（>50% 重抽，最多 5 轮）；④ 最终靠**换模型**解决（见 4.3） |
+| 前端看不到删除按钮 | ①浏览器缓存旧 index.html（改动后不刷新永远看不到新功能）②删除按钮 CSS 用 `position:absolute` 但卡片 `.tile` 没设 `position:relative`，按钮脱离卡片被甩到 body 角落 | ① `/` 接口加 `Cache-Control: no-cache` ② `.tile` 加 `position:relative`，按钮改陶土橙圆角小按钮（橙底+描边，悬停实心） |
 
 ### 4.3 换模型实测结论（2026-08-10，用户拍板留 deepseek-v4-pro）
 
@@ -153,22 +158,30 @@ personalaitext/
 - **无主题纯感悟模式**（本轮新增）：朋友圈无主题不再注入场景，直接写道理/感悟（用户："参考文档里也有很多是没主题的道理感悟"）；小红书/话术仍走场景池
 - **主模型换为 deepseek-v4-pro**（.env 固化），详见 4.3
 
+### 5.4 换参考文档 = 换风格（验证成立）+ 归档功能（本窗口新增）
+
+- **换样本换风格**：瓷砖样本（85 条）换成**插画师朋友圈样本**（41 条，原创插画师文案，主题偏灵感/画画/生活感悟）→ 重建画像 + 重启服务后，生成风格 4/5 完全切换（谈灵感、画画、节气），仅 1 条有轻微生意先验残留。结论：**换参考文档就能换风格**，画像和示例都来自 data/，前端上传即生效。
+- **前端移除参考文档 = 归档不真删**（用户要求）：`delete_sample` 把文件移入 `data/_archive/`，可恢复；前端卡片悬停 × 移除 → 归档区显示 → 恢复按钮移回。移除后 `generator.reset_pools()` 清示例池缓存。`data/` 用 `glob("*")` 不递归，归档文件不会被读入。
+- **移除后 0 样本**：自动 `clear_style()` 清画像，前端提示重新生成。
+- ⚠️ 换样本/重建画像后**必须重启服务**（示例池懒加载缓存），重启后强刷页面。
+
 ### 5.3 测试注意事项（踩过的坑）
 
 - **curl 发中文 JSON 会 500**：Git Bash 的 curl `-d '中文'` 按 GBK 编码发送，FastAPI 按 UTF-8 解析报 `UnicodeDecodeError`。**测试中文 body 必须写成 UTF-8 文件再 `-d @file.json`**（加 `-H "Content-Type: application/json; charset=utf-8"`）
 - 后台跑 uvicorn 时日志重定向到文件才能看到报错堆栈
+- **换样本/重建画像后必须重启服务**：示例池 `_refill_pool` 懒加载缓存，启动时装的是当时的 data/；画像文件改了但服务不重启的话，示例池还是旧样本，画像和示例打架、输出风格混乱。换样本后一定重启 uvicorn
 
 ## 6. 环境与安全（务必遵守）
 
 - `.env` 含 DashScope API key：**绝不读取其内容、绝不提交 git**（.gitignore 已排除，提交前自查 `git status`）
-- git 仓库在项目根：备份提交 `b9d49e1`（v1 时代）；**画像 v2 重构 + 本轮全部调优（纯感悟模式/模型切换/主题多元）尚未提交 git**（本窗口结束时待定）
+- git 仓库在项目根：备份提交 `b9d49e1`（v1 时代）、画像 v2 提交 `d03a898`；**本轮归档功能 + 插画师样本 + 前端删除按钮已提交**。`style/`（画像）与 `*.old`（备份）已进 .gitignore，不入库
 - 临时测试脚本放系统 Temp，用完即删
 - 前端改完刷新即生效；Python 改完需重启 uvicorn（启动稍慢，等待脚本超时不算失败，直接 curl 验证）
 
 ## 7. 下一步
 
-1. **git 提交**（用户确认后执行，建议信息"feat: 画像 v2 + 纯感悟模式 + 换 deepseek-v4-pro"；提交前自查 `.env` 未被跟踪）
-2. 用户多轮实测生成效果，重点看：humor 套路是否真的学得会（样本自嘲型只有 6 条）、三段句库是否带来"套模板感"、两档模式差异是否明显、deepseek-v4-pro 速度是否可接受
+1. 用户多轮实测**插画师风格**下的生成效果（样本已换为插画师，画像可随时前端重新生成）
+2. 测试**归档功能**：前端悬停卡片 × 移除 → 归档区 → 恢复
 3. 若 humor 效果不明显：考虑补充自嘲幽默类样本（用户已有认知：补 5 条幽默型价值 > 补 20 条观念型）
 4. 若后续想换回 qwen-plus 或试其他模型：改 .env `LLM_MODEL_NAME` 一行即可
-5. 远期：样本量到几百条后可考虑微调模型（终极"像本人"，当前 85 条不够）
+5. 远期：样本量到几百条后可考虑微调模型（终极"像本人"，当前 41 条插画师样本不够）

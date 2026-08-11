@@ -97,6 +97,13 @@ def _refill_pool() -> None:
     random.shuffle(_example_pool)
 
 
+def reset_pools() -> None:
+    """清空示例/子类型池缓存：样本文件增减后调用，强制下次生成时重新读取 data/"""
+    global _example_pool, _subtype_pools
+    _example_pool = []
+    _subtype_pools = {}
+
+
 # 子类型均衡抽取用的分类型池：每类一个小池，类内一轮不重复
 _subtype_pools: dict[str, list[str]] = {}
 

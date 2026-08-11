@@ -14,3 +14,7 @@ Thumbs.db
 # 临时文件
 *.log
 tmp/
+
+# 运行时产物（不入库）
+style/
+*.old
