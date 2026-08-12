@@ -189,23 +189,6 @@
 
   .empty-tip { font-size: 13px; color: var(--ink-soft); margin-top: 12px; }
 
-  /* 已移除（归档）样本区 */
-  .archived-head {
-    display: flex; justify-content: space-between; align-items: center;
-    font-size: 12px; color: var(--ink-soft); margin-bottom: 6px;
-  }
-  .archived-item {
-    display: flex; justify-content: space-between; align-items: center;
-    border: 1px dashed var(--line); border-radius: 6px;
-    padding: 6px 10px; margin-bottom: 6px; font-size: 12px;
-  }
-  .archived-item .fname { max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .archived-item button {
-    border: 1px solid var(--line); background: none; border-radius: 5px;
-    font-size: 12px; color: var(--ink); cursor: pointer; padding: 2px 8px;
-  }
-  .archived-item button:hover { border-color: var(--ink-soft); }
-
   /* ---------- 按钮 ---------- */
   .btn {
     appearance: none; border: none; cursor: pointer;
@@ -406,13 +389,6 @@
         <div class="tiles" id="tiles"></div>
         <div class="preview" id="preview"></div>
         <p class="empty-tip" id="sampleEmpty">还没有参考文档，先点上方按钮上传几篇文案。</p>
-        <div class="archived" id="archivedArea" style="display:none; margin-top:14px;">
-          <div class="archived-head">
-            <span>已移除（归档）· 文件保留，不再参与生成</span>
-            <span id="archivedCount"></span>
-          </div>
-          <div id="archivedList"></div>
-        </div>
       </div>
     </div>
   </section>
@@ -549,7 +525,7 @@
     state = await res.json();
     // 回填画像里记录的行业：行业随画像持久化，刷新后自动填回（改行业需重新生成画像）
     if (state.style && state.style.industry) $('industryInput').value = state.style.industry;
-    renderSamples(); renderStyle(); renderArchived();
+    renderSamples(); renderStyle();
     buildBtn.disabled = state.sample_count === 0;
     genHint.textContent = state.style_built ? '画像就绪，点击生成' : '请先完成步骤 1 和 2';
     updatePanelStatus();
@@ -565,7 +541,7 @@
       el.className = 'tile';
       el.title = '点击查看内容';
       el.innerHTML = `
-        <button class="remove" title="移出此参考文档（文件保留，可恢复）">×</button>
+        <button class="remove" title="删除此参考文档（不可恢复）">×</button>
         <div class="swatch" style="background:${SWATCHES[hash(s.name) % SWATCHES.length]}"></div>
         <div class="fname">${escapeHtml(s.name)}</div>
         <div class="fmeta">${fmtSize(s.size)} · ${s.mtime}</div>`;
@@ -577,7 +553,7 @@
 
   async function deleteSample(name, ev) {
     ev.stopPropagation();
-    if (!confirm(`确定将「${name}」移出吗？\n它不再参与画像生成和示例抽取，文件会保留在归档区，可随时恢复。`)) return;
+    if (!confirm(`确定删除「${name}」吗？\n文件将从服务器移除，不可恢复。`)) return;
     const res = await fetch('/api/sample?name=' + encodeURIComponent(name), { method: 'DELETE' }).then(r => r.json());
     if (res.ok) {
       preview.classList.remove('show');
@@ -585,41 +561,6 @@
       alert(res.message + (res.total > 0 ? '；画像基于旧样本，需要时请重新生成' : ''));
     } else {
       alert(res.message || '移除失败');
-    }
-  }
-
-  /* ---------- 已移除（归档）样本 ---------- */
-  function renderArchived() {
-    const area = document.getElementById('archivedArea');
-    const list = document.getElementById('archivedList');
-    const cnt = document.getElementById('archivedCount');
-    const items = state.archived || [];
-    if (!items.length) { area.style.display = 'none'; return; }
-    area.style.display = 'block';
-    cnt.textContent = items.length + ' 个';
-    list.innerHTML = '';
-    items.forEach(it => {
-      const row = document.createElement('div');
-      row.className = 'archived-item';
-      row.innerHTML = `<span class="fname" title="${escapeHtml(it.name)}">${escapeHtml(it.name)}</span>
-        <button type="button">恢复</button>`;
-      row.querySelector('button').addEventListener('click', () => restoreSample(it.name));
-      list.appendChild(row);
-    });
-  }
-
-  async function restoreSample(name) {
-    if (!confirm(`确定恢复「${name}」吗？恢复后它重新参与画像生成和示例抽取。`)) return;
-    const res = await fetch('/api/restore', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
-    }).then(r => r.json());
-    if (res.ok) {
-      refresh();
-      alert(res.message);
-    } else {
-      alert(res.message || '恢复失败');
     }
   }
 

@@ -111,46 +111,12 @@ def clear_samples() -> int:
     return count
 
 
-ARCHIVE_DIR = DATA_DIR / "_archive"
-
-
 def delete_sample(name: str) -> bool:
-    """把单个样本移出检索目录（移入 data/_archive/ 归档，不真删、可恢复），成功返回 True"""
+    """直接删除单个样本文件（服务器部署版：不保留归档），成功返回 True"""
     path = DATA_DIR / _safe_name(name)
     if not path.is_file() or path.suffix.lower() not in ALLOWED_EXTENSIONS:
         return False
-    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
-    dest = ARCHIVE_DIR / path.name
-    if dest.exists():  # 归档里已有同名，加时间戳后缀避免覆盖
-        dest = ARCHIVE_DIR / f"{path.stem}_{datetime.now():%H%M%S}{path.suffix}"
-    path.rename(dest)
-    return True
-
-
-def list_archived() -> list[dict]:
-    """列出已移出（归档）的样本文件信息"""
-    if not ARCHIVE_DIR.exists():
-        return []
-    items = []
-    for p in sorted(ARCHIVE_DIR.glob("*"), key=lambda x: x.stat().st_mtime, reverse=True):
-        if p.is_file():
-            items.append({
-                "name": p.name,
-                "size": p.stat().st_size,
-                "mtime": datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
-            })
-    return items
-
-
-def restore_sample(name: str) -> bool:
-    """把归档样本移回检索目录 data/（同名冲突时跳过），成功返回 True"""
-    path = ARCHIVE_DIR / _safe_name(name)
-    if not path.is_file():
-        return False
-    dest = DATA_DIR / path.name
-    if dest.exists():
-        return False
-    path.rename(dest)
+    path.unlink()
     return True
 
 
