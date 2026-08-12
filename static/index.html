@@ -97,6 +97,9 @@
   .panel-status.ok {
     color: var(--glaze-deep); border-color: var(--glaze-soft); background: var(--glaze-soft);
   }
+  .panel-status.warn {
+    color: var(--warn); border-color: rgba(180,85,45,.35); background: rgba(180,85,45,.10);
+  }
   .chevron {
     font-size: 18px; color: var(--ink-soft); line-height: 1;
     transition: transform .25s ease;
@@ -240,6 +243,28 @@
 
   .btn-row { display: flex; flex-wrap: wrap; gap: 10px; }
 
+  /* ---------- AI 等待状态条（三点跳动 + 场景文案） ---------- */
+  .ai-think {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 12px;
+    font-size: 13px; color: var(--glaze-deep);
+    background: var(--glaze-soft);
+    border: 1px solid var(--glaze-soft);
+    border-radius: 8px; padding: 10px 14px;
+  }
+  .ai-think .dots { display: inline-flex; gap: 4px; }
+  .ai-think .dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--glaze);
+    animation: dot-bounce 1.2s infinite ease-in-out;
+  }
+  .ai-think .dot:nth-child(2) { animation-delay: .15s; }
+  .ai-think .dot:nth-child(3) { animation-delay: .3s; }
+  @keyframes dot-bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: .4; }
+    30% { transform: translateY(-4px); opacity: 1; }
+  }
+
   /* ---------- 风格模式切换 ---------- */
   .mode-row { margin-top: 4px; align-items: center; }
   .mode-label {
@@ -348,6 +373,7 @@
     .tile { transition: none; }
     .panel.open .panel-body { animation: none; }
     .chevron { transition: none; }
+    .ai-think .dot { animation: none; opacity: .5; }
   }
 </style>
 </head>
@@ -397,6 +423,7 @@
       <span class="step-no">2</span>
       <h2 class="step-title">风格画像</h2>
       <span class="panel-right">
+        <span class="panel-status" id="industryStatus">行业：未填写</span>
         <span class="panel-status" id="styleStatus"></span>
         <span class="chevron" aria-hidden="true">⌄</span>
       </span>
@@ -404,7 +431,7 @@
     <div class="panel-body">
       <div class="panel-inner">
         <div class="industry-row">
-          <label class="mode-label" for="industryInput">行业（选填，用于生成角色身份）</label>
+          <label class="mode-label" for="industryInput">行业（必填，用于生成角色身份）</label>
           <input id="industryInput" class="topic-input" maxlength="20">
         </div>
         <div class="btn-row">
@@ -461,6 +488,9 @@
   const hash = (s) => [...s].reduce((a, c) => (a * 31 + c.codePointAt(0)) % 997, 7);
   const fmtSize = (n) => n > 1024 ? (n/1024).toFixed(1) + ' KB' : n + ' B';
 
+  // AI 等待状态条：三个弹跳圆点
+  const THINK_DOTS = '<span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>';
+
   let state = { sample_count: 0, style_built: false, style: null, samples: [] };
 
   /* ---------- 可折叠面板 ---------- */
@@ -492,6 +522,17 @@
     const st = $('samplesStatus');
     st.textContent = state.samples.length ? `已上传 ${state.samples.length} 篇` : '还没有参考文档';
     st.classList.toggle('ok', state.samples.length > 0);
+    const ind = $('industryInput').value.trim();
+    const is = $('industryStatus');
+    const styleInd = state.style && state.style.industry;
+    if (state.style_built && styleInd && ind && ind !== styleInd) {
+      is.textContent = `行业：${ind} · 与画像不一致，需重新生成画像`;
+      is.classList.remove('ok'); is.classList.add('warn');
+    } else if (ind) {
+      is.textContent = `行业：${ind}`; is.classList.add('ok'); is.classList.remove('warn');
+    } else {
+      is.textContent = '行业：未填写'; is.classList.remove('ok'); is.classList.add('warn');
+    }
     const st2 = $('styleStatus');
     if (state.style_built) {
       st2.textContent = `已就绪 · 基于 ${state.style?.sample_count ?? '?'} 篇`;
@@ -506,6 +547,8 @@
   async function refresh() {
     const res = await fetch('/api/status');
     state = await res.json();
+    // 回填画像里记录的行业：行业随画像持久化，刷新后自动填回（改行业需重新生成画像）
+    if (state.style && state.style.industry) $('industryInput').value = state.style.industry;
     renderSamples(); renderStyle(); renderArchived();
     buildBtn.disabled = state.sample_count === 0;
     genHint.textContent = state.style_built ? '画像就绪，点击生成' : '请先完成步骤 1 和 2';
@@ -674,9 +717,15 @@
   ['dragleave','drop'].forEach(ev => uploadBtn.addEventListener(ev, e => { e.preventDefault(); uploadBtn.classList.remove('drag'); }));
   uploadBtn.addEventListener('drop', e => uploadFiles(e.dataTransfer.files));
   fileInput.addEventListener('change', () => uploadFiles(fileInput.files));
+  $('industryInput').addEventListener('input', updatePanelStatus);
 
   /* ---------- 生成画像 ---------- */
   buildBtn.addEventListener('click', async () => {
+    if (!$('industryInput').value.trim()) { alert('请先填写行业，用于生成角色身份。'); $('industryInput').focus(); return; }
+    const think = document.createElement('div');
+    think.className = 'ai-think';
+    think.innerHTML = THINK_DOTS + `<span class="text">AI 分析样本中…（${state.sample_count} 篇）</span>`;
+    buildBtn.closest('.btn-row').after(think);
     buildBtn.disabled = true;
     buildBtn.textContent = '画像生成中…';
     try {
@@ -689,7 +738,7 @@
       if (d.ok) { state.style = d.style; state.style_built = true; renderStyle(); }
       else alert('生成失败：' + d.message);
     } catch (e) { alert('生成失败：' + e.message); }
-    finally { buildBtn.disabled = state.sample_count === 0; buildBtn.textContent = '生成画像'; refresh(); }
+    finally { think.remove(); buildBtn.disabled = state.sample_count === 0; buildBtn.textContent = '生成画像'; refresh(); }
   });
 
   /* ---------- 主题层：今天干了什么 → 主题 ---------- */
@@ -697,6 +746,10 @@
   topicBtn.addEventListener('click', async () => {
     const text = topicInput.value.trim();
     if (!text) { alert('先输入今天干了什么'); return; }
+    const think = document.createElement('div');
+    think.className = 'ai-think';
+    think.innerHTML = THINK_DOTS + '<span class="text">AI 整理思路中…</span>';
+    topicBtn.closest('.topic-box').appendChild(think);
     topicBtn.disabled = true;
     topicBtn.textContent = '主题生成中…';
     try {
@@ -711,6 +764,7 @@
     } catch (e) {
       alert('主题生成失败：' + e.message);
     }
+    think.remove();
     topicBtn.disabled = false;
     topicBtn.textContent = '生成主题';
   });
@@ -742,6 +796,20 @@
   genBtns.forEach(btn => {
     btn.addEventListener('click', async () => {
       if (streaming) return;
+      // 生成前校验：参考文档 / 行业名 / 风格画像，缺哪提示哪
+      const missing = [];
+      if (state.samples.length === 0) missing.push('参考文档');
+      if (!$('industryInput').value.trim()) missing.push('行业名');
+      if (!state.style_built) {
+        missing.push('风格画像');
+      } else if (state.style && state.style.industry) {
+        const ind = $('industryInput').value.trim();
+        if (ind && ind !== state.style.industry) missing.push(`按新行业「${ind}」重新生成画像`);
+      }
+      if (missing.length) {
+        alert('还缺少以下信息，无法生成：\n\n' + missing.map((m, i) => `${i + 1}. ${m}`).join('\n') + '\n\n请先补齐后再试。');
+        return;
+      }
       streaming = true;
       genBtns.forEach(b => b.disabled = true);
       modeBtns.forEach(b => b.disabled = true);
@@ -752,10 +820,16 @@
       tag.textContent = btn.textContent;
       showOutput();
       output.appendChild(tag);
+      // 等待首个字符时显示"AI 构思中"，首字到达即替换
+      const think = document.createElement('div');
+      think.className = 'ai-think';
+      think.innerHTML = THINK_DOTS + '<span class="text">AI 构思中…</span>';
+      output.appendChild(think);
       const body = document.createElement('div');
       body.className = 'body';
       output.appendChild(body);
       const caret = appendCaret();
+      let gotFirstDelta = false;
 
       try {
         const payload = { type, style_mode: styleMode };
@@ -782,12 +856,15 @@
             if (!line) continue;
             const ev = JSON.parse(line);
             if (ev.type === 'delta') {
+              if (!gotFirstDelta) { gotFirstDelta = true; think.remove(); }
               body.textContent += ev.content;
               body.scrollTop = 0;
               output.scrollIntoView({ block: 'nearest' });
             } else if (ev.type === 'done') {
+              think.remove();
               caret.remove();
             } else if (ev.type === 'error') {
+              think.remove();
               output.classList.add('error');
               body.textContent = '生成失败：' + ev.message;
               caret.remove();
@@ -795,6 +872,7 @@
           }
         }
       } catch (e) {
+        think.remove();
         caret.remove();
         output.classList.add('error');
         body.textContent = '生成失败：' + e.message;

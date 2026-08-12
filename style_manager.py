@@ -13,7 +13,7 @@ import re
 from datetime import datetime
 
 from config import ALLOWED_EXTENSIONS, DATA_DIR, STYLE_DIR, STYLE_FILE
-from llm import get_chat_model
+from llm import get_style_model
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ STYLE_ANALYSIS_PROMPT = """你是资深文案风格分析师。下面是同一�
 - 观念型：判断句格言（对生意、信任、坚持的朴实断言）
 - 感恩型：以感恩/致谢为主体或收尾
 - 自嘲型：自嘲幽默（苦中作乐）
-输出字段 subtypes：{{"1": "观念型", "2": "状态型", ...}}，键是样本编号，值只能是这四个类型之一。
+输出字段 subtypes：按类分组，键是四个子类型名，值是样本编号数组，如 {{"状态型": [1, 5, 8], "观念型": [2, 3, 9], "感恩型": [6], "自嘲型": [7, 10]}}。编号范围 1~{count}，四类全覆盖、不遗漏、不重复。
 
 硬性要求：
 - openings / core_templates / closings / humor / tone_anchors 里的 example 和 structure_example 必须来自样本原文，照抄，禁止改写、禁止新编
@@ -198,17 +198,33 @@ def _norm_str(v) -> str:
 
 
 def _validate_subtypes(raw, entry_count: int) -> dict | None:
-    """校验 LLM 的样本分类：键必须覆盖 1..N，值必须是四类之一；失败返回 None"""
+    """校验 LLM 的样本分类，返回 {编号: 类}；失败返回 None
+    支持两种格式：
+    - 新格式（压缩）：{类: [编号, ...]}，如 {"状态型": [1,5], "观念型": [2,3]}
+    - 旧格式（兼容）：{编号: 类}，如 {"1": "观念型", "2": "状态型"}
+    """
     if not isinstance(raw, dict):
         return None
+    # 旧格式：编号 → 类
+    if all(str(k).isdigit() for k in raw):
+        mapping = {}
+        for k, v in raw.items():
+            if not 1 <= int(k) <= entry_count or v not in SUBTYPE_NAMES:
+                return None
+            mapping[int(k)] = v
+        return mapping if set(mapping) == set(range(1, entry_count + 1)) else None
+    # 新格式：类 → 编号列表（全覆盖、不重复、不越界）
     mapping = {}
-    for k, v in raw.items():
-        if not str(k).isdigit() or not 1 <= int(k) <= entry_count or v not in SUBTYPE_NAMES:
-            return None
-        mapping[int(k)] = v
-    if set(mapping) != set(range(1, entry_count + 1)):
-        return None
-    return mapping
+    for cls in SUBTYPE_NAMES:
+        for idx in raw.get(cls) or []:
+            try:
+                i = int(idx)
+            except (TypeError, ValueError):
+                return None
+            if not 1 <= i <= entry_count or i in mapping:
+                return None
+            mapping[i] = cls
+    return mapping if set(mapping) == set(range(1, entry_count + 1)) else None
 
 
 def _length_stats(entries: list[str]) -> dict:
@@ -222,10 +238,15 @@ def _length_stats(entries: list[str]) -> dict:
     return {"min": chars[0], "median": median, "max": chars[-1]}
 
 
+def _norm_industry(industry: str | None) -> str:
+    """清洗行业：去空白、去'行业'后缀，空则兜底'瓷砖'（industry 字段与 identity 共用）"""
+    ind = (industry or "").strip()
+    return (ind.rstrip("行业").strip()) or "瓷砖"
+
+
 def _make_identity(industry: str | None) -> str:
     """身份字段：由用户输入的行业拼接（不再让 LLM 提炼，效果不稳）"""
-    ind = (industry or "").strip() or "瓷砖"
-    ind = ind.rstrip("行业").strip() or "瓷砖"
+    ind = _norm_industry(industry)
     return f"在{ind}行业摸爬滚打多年的老手，日常就是发发朋友圈、接待顾客、跑工地送货，靠真诚和靠谱把生意做稳"
 
 
@@ -240,15 +261,23 @@ def build_style(industry: str | None = None) -> dict:
     numbered = "\n".join(f"第{i}条：{e[:MAX_ENTRY_CHARS]}" for i, e in enumerate(entries, 1))
     prompt = STYLE_ANALYSIS_PROMPT.format(count=len(entries), numbered_samples=numbered)
 
-    llm = get_chat_model()
+    llm = get_style_model()
     parsed = _parse_style_json(llm.invoke(prompt).content)
 
-    # 子类型分类必须完整（键覆盖全部编号、值合法），失败重试一次
-    mapping = _validate_subtypes(parsed.get("subtypes"), len(entries))
-    if mapping is None:
-        logger.warning("样本分类不完整，重试一次")
-        parsed = _parse_style_json(llm.invoke(prompt).content)
+    # 子类型分类必须完整（键覆盖全部编号、值合法），最多重试 3 次
+    # （deepseek-chat 对长样本偶尔输出不完整，多试几次提高成功率）
+    mapping = None
+    for attempt in range(3):
+        if attempt:
+            logger.warning("画像解析/样本分类不完整，第 %d 次重试", attempt + 1)
+        try:
+            parsed = _parse_style_json(llm.invoke(prompt).content)
+        except Exception:
+            logger.warning("画像 JSON 解析失败，第 %d 次重试", attempt + 1)
+            continue
         mapping = _validate_subtypes(parsed.get("subtypes"), len(entries))
+        if mapping is not None:
+            break
     if mapping is None:
         raise ValueError("画像构建失败：样本子类型分类不完整，请重试")
 
@@ -259,6 +288,7 @@ def build_style(industry: str | None = None) -> dict:
 
     style = {
         "identity": _make_identity(industry),
+        "industry": _norm_industry(industry),  # 记录行业，前端回填/一致性判断用（不进生成 prompt）
         "structure": _norm_str(parsed.get("structure")),
         "structure_example": _norm_str(parsed.get("structure_example")),
         "openings": parsed.get("openings") or [],
