@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>瓷砖文案生成器</title>
+<title>借笔 · 文案风格生成器</title>
 <style>
-  /* ========== 釉面与色卡：瓷砖文案生成器 ========== */
+  /* ========== 釉面与色卡：借笔 ========== */
   :root {
     --bg: #F3F0EA;          /* 坯体暖灰 */
     --bg-card: #FBF9F5;     /* 米白釉面 */
@@ -50,7 +50,7 @@
   }
 
   /* ---------- 头部 ---------- */
-  header { margin-bottom: 36px; }
+  header { margin-bottom: 32px; }
   .eyebrow {
     display: flex; align-items: center; gap: 10px;
     font-size: 12px; letter-spacing: .18em;
@@ -76,6 +76,40 @@
     padding: 22px 24px 24px;
     margin-bottom: 20px;
   }
+
+  /* 可折叠面板：内边距移到面板头 + 面板体，整体可点 */
+  .panel.collapsible { padding: 0; overflow: hidden; }
+  .panel-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 16px 22px 14px;
+    cursor: pointer; user-select: none;
+    transition: background .2s;
+  }
+  .panel-head:hover { background: var(--glaze-soft); }
+  .panel-head:focus-visible { outline: 2px solid var(--glaze); outline-offset: -2px; }
+  .panel-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .panel-status {
+    font-size: 12.5px; color: var(--ink-soft);
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 999px; padding: 3px 12px;
+    white-space: nowrap;
+  }
+  .panel-status.ok {
+    color: var(--glaze-deep); border-color: var(--glaze-soft); background: var(--glaze-soft);
+  }
+  .chevron {
+    font-size: 18px; color: var(--ink-soft); line-height: 1;
+    transition: transform .25s ease;
+  }
+  .panel.open .chevron { transform: rotate(180deg); }
+  .panel-body { display: none; }
+  .panel.open .panel-body { display: block; animation: panel-open .22s ease; }
+  @keyframes panel-open {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+  }
+  .panel-inner { padding: 0 22px 22px; }
+
   .step-head {
     display: flex; align-items: baseline; gap: 12px;
     margin-bottom: 14px;
@@ -91,21 +125,23 @@
   .step-title { font-size: 17px; font-weight: 700; margin: 0; }
   .step-hint { margin-left: auto; font-size: 12px; color: var(--ink-soft); }
 
-  /* ---------- 上传区 ---------- */
-  .dropzone {
-    border: 1.5px dashed var(--line);
-    border-radius: var(--radius);
-    padding: 26px 16px;
-    text-align: center;
-    cursor: pointer;
-    transition: border-color .2s, background .2s;
+  /* ---------- 上传按钮（替代原大拖拽区） ---------- */
+  .btn-upload {
+    width: 100%;
+    border: 1.5px dashed var(--glaze);
+    background: var(--glaze-soft);
+    color: var(--glaze-deep);
+    padding: 14px 20px;
+    font-size: 14px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: background .2s, border-color .2s, color .2s;
   }
-  .dropzone:hover, .dropzone.drag { border-color: var(--glaze); background: var(--glaze-soft); }
-  .dropzone p { margin: 0; font-size: 14px; }
-  .dropzone .small { font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
-  .dropzone input { display: none; }
+  .btn-upload .plus { font-size: 18px; font-weight: 700; line-height: 1; }
+  .btn-upload:hover { background: #CEE4DF; }
+  .btn-upload.drag { background: var(--glaze); border-color: var(--glaze); color: #fff; }
+  .upload-tip { text-align: center; font-size: 12px; color: var(--ink-soft); margin: 8px 0 16px; }
 
-  /* 样本瓷砖卡片 */
+  /* 样本参考文档卡片 */
   .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 16px; }
   .tile {
     position: relative; /* 让 .remove 按钮能锚定在卡片内 */
@@ -115,7 +151,6 @@
     background: var(--bg-card);
     cursor: pointer;
     transition: box-shadow .15s, transform .15s;
-    position: relative;
   }
   .tile:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
   .tile .swatch {
@@ -216,7 +251,7 @@
   }
 
   /* ---------- 行业输入区 ---------- */
-  .industry-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 2px; }
+  .industry-row { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
   .industry-row .topic-input { flex: 1; padding: 7px 12px; font-size: 13px; }
 
   /* ---------- 主题输入区 ---------- */
@@ -236,10 +271,25 @@
   }
   .topic-area:focus { border-color: var(--glaze); border-style: solid; }
 
-  /* ---------- 画像摘要 ---------- */
+  /* ---------- 画像摘要（详情默认收起，展开查看） ---------- */
+  .style-details {
+    margin-top: 14px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg);
+  }
+  .style-details summary {
+    cursor: pointer; list-style: none; user-select: none;
+    padding: 10px 14px;
+    font-size: 13px; font-weight: 600; color: var(--glaze-deep);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .style-details summary::-webkit-details-marker { display: none; }
+  .style-details summary::before { content: '▸'; color: var(--ink-soft); transition: transform .2s; }
+  .style-details[open] summary::before { transform: rotate(90deg); }
+  .details-body { padding: 2px 14px 14px; }
   .style-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .style-cell {
-    background: var(--bg);
+    background: var(--bg-card);
     border: 1px solid var(--line);
     border-radius: 8px;
     padding: 10px 12px;
@@ -286,6 +336,9 @@
   @media (max-width: 600px) {
     .wrap { padding: 28px 14px 48px; }
     h1 { font-size: 26px; }
+    .panel-head { padding: 14px 16px 12px; }
+    .panel-inner { padding: 0 16px 16px; }
+    .panel-status { max-width: 42vw; overflow: hidden; text-overflow: ellipsis; }
     .style-grid { grid-template-columns: 1fr; }
     .step-hint { display: none; }
   }
@@ -293,6 +346,8 @@
     .btn-primary::after { transition: none; left: 0; display: none; }
     .caret { animation: none; }
     .tile { transition: none; }
+    .panel.open .panel-body { animation: none; }
+    .chevron { transition: none; }
   }
 </style>
 </head>
@@ -300,53 +355,67 @@
 <div class="wrap">
 
   <header>
-    <div class="eyebrow">TILE&nbsp;COPY&nbsp;STUDIO</div>
-    <h1>瓷砖文案生成器</h1>
-    <p class="sub">上传你喜欢的文案，AI 提炼风格，一键生成新文案。</p>
+    <div class="eyebrow">BORROWED&nbsp;PEN</div>
+    <h1>借笔</h1>
+    <p class="sub">上传你喜欢的文案，借它的笔，写你想说的话。</p>
   </header>
 
-  <!-- 步骤 1：样本上传 -->
-  <section class="panel">
-    <div class="step-head">
+  <!-- 步骤 1：参考文档（可折叠，列表保留「点击看内容」） -->
+  <section class="panel collapsible" id="panelSamples">
+    <div class="panel-head" role="button" tabindex="0" aria-expanded="true">
       <span class="step-no">1</span>
-      <h2 class="step-title">上传样本</h2>
-      <span class="step-hint">支持 .txt / .md，可多选</span>
+      <h2 class="step-title">参考文档</h2>
+      <span class="panel-right">
+        <span class="panel-status" id="samplesStatus"></span>
+        <span class="chevron" aria-hidden="true">⌄</span>
+      </span>
     </div>
-    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="选择样本文本文件">
-      <p>把文案文件拖到这里，或 <u>点击选择</u></p>
-      <p class="small">样本越有代表性，生成的文案越贴风格</p>
-      <input type="file" id="fileInput" multiple accept=".txt,.md">
-    </div>
-    <div class="industry-row">
-      <label class="mode-label" for="industryInput">行业（选填，用于生成角色身份）</label>
-      <input id="industryInput" class="topic-input" placeholder="例：瓷砖，留空默认瓷砖" maxlength="20">
-    </div>
-    <div class="tiles" id="tiles"></div>
-    <div class="preview" id="preview"></div>
-    <p class="empty-tip" id="sampleEmpty">还没有样本，先上传几篇文案。</p>
-    <div class="archived" id="archivedArea" style="display:none; margin-top:14px;">
-      <div class="archived-head">
-        <span>已移除（归档）· 文件保留，不再参与生成</span>
-        <span id="archivedCount"></span>
+    <div class="panel-body">
+      <div class="panel-inner">
+        <button type="button" class="btn btn-upload" id="uploadBtn" aria-label="选择参考文档文件">
+          <span class="plus">＋</span>上传参考文档（.txt / .md）
+        </button>
+        <p class="upload-tip">点击选择文件，或将文件直接拖到按钮上 · 可多选</p>
+        <input type="file" id="fileInput" multiple accept=".txt,.md" style="display:none">
+        <div class="tiles" id="tiles"></div>
+        <div class="preview" id="preview"></div>
+        <p class="empty-tip" id="sampleEmpty">还没有参考文档，先点上方按钮上传几篇文案。</p>
+        <div class="archived" id="archivedArea" style="display:none; margin-top:14px;">
+          <div class="archived-head">
+            <span>已移除（归档）· 文件保留，不再参与生成</span>
+            <span id="archivedCount"></span>
+          </div>
+          <div id="archivedList"></div>
+        </div>
       </div>
-      <div id="archivedList"></div>
     </div>
   </section>
 
-  <!-- 步骤 2：风格画像 -->
-  <section class="panel">
-    <div class="step-head">
+  <!-- 步骤 2：风格画像（可折叠，详情默认收起） -->
+  <section class="panel collapsible" id="panelStyle">
+    <div class="panel-head" role="button" tabindex="0" aria-expanded="true">
       <span class="step-no">2</span>
-      <h2 class="step-title">生成画像</h2>
-      <span class="step-hint" id="styleHint">基于全部样本提炼</span>
+      <h2 class="step-title">风格画像</h2>
+      <span class="panel-right">
+        <span class="panel-status" id="styleStatus"></span>
+        <span class="chevron" aria-hidden="true">⌄</span>
+      </span>
     </div>
-    <div class="btn-row">
-      <button class="btn btn-primary" id="buildBtn">生成画像</button>
+    <div class="panel-body">
+      <div class="panel-inner">
+        <div class="industry-row">
+          <label class="mode-label" for="industryInput">行业（选填，用于生成角色身份）</label>
+          <input id="industryInput" class="topic-input" maxlength="20">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="buildBtn">生成画像</button>
+        </div>
+        <div id="styleArea"></div>
+      </div>
     </div>
-    <div id="styleArea" style="margin-top:14px;"></div>
   </section>
 
-  <!-- 步骤 3：生成文案 -->
+  <!-- 步骤 3：生成文案（常开，核心操作） -->
   <section class="panel">
     <div class="step-head">
       <span class="step-no">3</span>
@@ -356,10 +425,10 @@
     <div class="topic-box">
       <label class="mode-label" for="topicInput">今天干了什么（选填，不填则随机场景）</label>
       <div class="topic-row">
-        <input id="topicInput" class="topic-input" placeholder="例：给客户送砖上门，客户很满意" maxlength="100">
+        <input id="topicInput" class="topic-input" maxlength="100">
         <button class="btn btn-ghost" id="topicBtn">生成主题</button>
       </div>
-      <textarea id="topicArea" class="topic-area" rows="2" placeholder="主题生成后显示在这里，可直接修改"></textarea>
+      <textarea id="topicArea" class="topic-area" rows="2"></textarea>
     </div>
     <div class="btn-row">
       <button class="btn btn-primary" data-type="xiaohongshu">小红书种草</button>
@@ -382,9 +451,9 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const dropzone = $('dropzone'), fileInput = $('fileInput'), tiles = $('tiles'),
+  const uploadBtn = $('uploadBtn'), fileInput = $('fileInput'), tiles = $('tiles'),
         preview = $('preview'), sampleEmpty = $('sampleEmpty'),
-        buildBtn = $('buildBtn'), styleArea = $('styleArea'), styleHint = $('styleHint'),
+        buildBtn = $('buildBtn'), styleArea = $('styleArea'),
         output = $('output'), genHint = $('genHint'), resetBtn = $('resetBtn');
 
   // 样本瓷片用的一组釉色（按文件名取色）
@@ -394,6 +463,45 @@
 
   let state = { sample_count: 0, style_built: false, style: null, samples: [] };
 
+  /* ---------- 可折叠面板 ---------- */
+  function setPanelOpen(panel, open) {
+    panel.classList.toggle('open', open);
+    panel.querySelector('.panel-head').setAttribute('aria-expanded', open);
+  }
+  document.querySelectorAll('.panel.collapsible .panel-head').forEach(head => {
+    head.addEventListener('click', () => {
+      const panel = head.closest('.panel');
+      setPanelOpen(panel, !panel.classList.contains('open'));
+    });
+    head.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); head.click(); }
+    });
+  });
+
+  // 首次加载后按内容设置默认开合：参考文档展开（列表可见）；画像有则收起、无则展开引导生成
+  let inited = false;
+  function initOpen() {
+    if (inited) return;
+    inited = true;
+    setPanelOpen($('panelSamples'), true);
+    setPanelOpen($('panelStyle'), !state.style_built);
+  }
+
+  // 面板头状态摘要（折叠时也能看到）
+  function updatePanelStatus() {
+    const st = $('samplesStatus');
+    st.textContent = state.samples.length ? `已上传 ${state.samples.length} 篇` : '还没有参考文档';
+    st.classList.toggle('ok', state.samples.length > 0);
+    const st2 = $('styleStatus');
+    if (state.style_built) {
+      st2.textContent = `已就绪 · 基于 ${state.style?.sample_count ?? '?'} 篇`;
+      st2.classList.add('ok');
+    } else {
+      st2.textContent = '未生成画像';
+      st2.classList.remove('ok');
+    }
+  }
+
   /* ---------- 状态 ---------- */
   async function refresh() {
     const res = await fetch('/api/status');
@@ -401,6 +509,8 @@
     renderSamples(); renderStyle(); renderArchived();
     buildBtn.disabled = state.sample_count === 0;
     genHint.textContent = state.style_built ? '画像就绪，点击生成' : '请先完成步骤 1 和 2';
+    updatePanelStatus();
+    initOpen();
   }
 
   /* ---------- 样本渲染 ---------- */
@@ -483,7 +593,7 @@
     }
   }
 
-  /* ---------- 画像渲染 ---------- */
+  /* ---------- 画像渲染（详情可折叠，默认收起） ---------- */
   const STYLE_LABELS = {
     structure:'结构骨架', openings:'开头句库', core_templates:'观念主体', closings:'收尾句库',
     imagery:'意象', tone_anchors:'语气锚点', humor:'幽默套路', length:'篇幅', avoid:'要避免的'
@@ -509,12 +619,17 @@
   }
   function renderStyle() {
     styleArea.innerHTML = '';
-    styleHint.textContent = '基于全部样本提炼';
     if (!state.style) {
       styleArea.innerHTML = `<p class="empty-tip">画像未生成。上传样本后点击「生成画像」，AI 会提炼这套文案的风格。</p>`;
       return;
     }
     const s = state.style;
+    const det = document.createElement('details');
+    det.className = 'style-details';
+    const sum = document.createElement('summary');
+    sum.textContent = '展开查看画像详情';
+    const body = document.createElement('div');
+    body.className = 'details-body';
     const grid = document.createElement('div');
     grid.className = 'style-grid';
     Object.entries(STYLE_LABELS).forEach(([k, label]) => {
@@ -530,12 +645,14 @@
       cell.innerHTML = `<div class="k">${label}</div><div class="v">${escapeHtml(fmtStyleValue(k, v))}</div>`;
       grid.appendChild(cell);
     });
-    styleArea.appendChild(grid);
+    body.appendChild(grid);
     const meta = document.createElement('div');
     meta.className = 'style-meta';
     meta.textContent = `基于 ${s.sample_count ?? '?'} 篇样本 · ${s.source_files?.join('、') ?? ''} · ${s.built_at ?? ''}`;
-    styleArea.appendChild(meta);
-    styleHint.textContent = '画像已就绪，可重复使用';
+    body.appendChild(meta);
+    det.appendChild(sum);
+    det.appendChild(body);
+    styleArea.appendChild(det);
   }
 
   /* ---------- 上传 ---------- */
@@ -543,21 +660,20 @@
     if (!fileList.length) return;
     const fd = new FormData();
     [...fileList].forEach(f => fd.append('files', f));
-    const btn = dropzone.querySelector('p');
-    btn.textContent = '上传中…';
+    uploadBtn.innerHTML = '上传中…';
     fetch('/api/upload', { method: 'POST', body: fd })
       .then(r => r.json())
       .then(d => { alert(d.message); refresh(); })
       .catch(e => alert('上传失败：' + e.message))
-      .finally(() => { btn.innerHTML = '把文案文件拖到这里，或 <u>点击选择</u>'; fileInput.value = ''; });
+      .finally(() => { uploadBtn.innerHTML = '<span class="plus">＋</span>上传参考文档（.txt / .md）'; fileInput.value = ''; });
   }
 
-  dropzone.addEventListener('click', () => fileInput.click());
-  dropzone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+  uploadBtn.addEventListener('click', () => fileInput.click());
+  uploadBtn.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
+  ['dragover','dragenter'].forEach(ev => uploadBtn.addEventListener(ev, e => { e.preventDefault(); uploadBtn.classList.add('drag'); }));
+  ['dragleave','drop'].forEach(ev => uploadBtn.addEventListener(ev, e => { e.preventDefault(); uploadBtn.classList.remove('drag'); }));
+  uploadBtn.addEventListener('drop', e => uploadFiles(e.dataTransfer.files));
   fileInput.addEventListener('change', () => uploadFiles(fileInput.files));
-  ['dragover','dragenter'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('drag'); }));
-  ['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('drag'); }));
-  dropzone.addEventListener('drop', e => uploadFiles(e.dataTransfer.files));
 
   /* ---------- 生成画像 ---------- */
   buildBtn.addEventListener('click', async () => {
