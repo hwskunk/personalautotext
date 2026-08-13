@@ -342,13 +342,54 @@
 
   /* ---------- 响应与可访问性 ---------- */
   @media (max-width: 600px) {
-    .wrap { padding: 28px 14px 48px; }
+    .wrap {
+      padding: 28px 14px 48px;
+      padding-bottom: calc(48px + env(safe-area-inset-bottom)); /* iPhone 底部安全区 */
+    }
     h1 { font-size: 26px; }
     .panel-head { padding: 14px 16px 12px; }
+    .panel-head:active { background: var(--glaze-soft); } /* 触屏点按反馈（hover 在手机上无效） */
     .panel-inner { padding: 0 16px 16px; }
     .panel-status { max-width: 42vw; overflow: hidden; text-overflow: ellipsis; }
     .style-grid { grid-template-columns: 1fr; }
     .step-hint { display: none; }
+
+    /* ---- 手机触控适配 ---- */
+    /* 统一触控目标：按钮加高到 ≥46px，符合 44px 触控规范 */
+    .btn { min-height: 46px; }
+    .btn-upload { min-height: 54px; }
+
+    /* 生成文案的三个主按钮：垂直堆叠，全宽等高 */
+    .gen-row { flex-direction: column; }
+
+    /* 风格模式：标签独立一行，模式按钮占满 */
+    .mode-row { flex-direction: column; align-items: stretch; }
+    .mode-row .mode-label { margin: 2px 0 4px; }
+
+    /* 行业行：标签在上、输入框在下，占满全宽 */
+    .industry-row { flex-direction: column; align-items: stretch; }
+    .industry-row .topic-input { width: 100%; }
+
+    /* 主题行：输入框与「生成主题」按钮上下排列 */
+    .topic-row { flex-direction: column; align-items: stretch; }
+
+    /* 参考文档瓷片：固定 2 列，加大可点区域 */
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    .tile { padding: 12px; }
+
+    /* 输出区贴合屏幕宽度 */
+    .output { padding: 14px; }
+  }
+
+  /* 触摸设备：去掉只在 hover 时才有意义的效果，靠 active 反馈 */
+  @media (hover: none) {
+    .btn-primary::after { display: none; }
+    .btn-primary:hover:not(:disabled) { box-shadow: none; }
+    .btn-ghost:hover:not(:disabled) { background: transparent; }
+    .btn-upload:hover { background: var(--glaze-soft); }
+    .panel-head:hover { background: transparent; }
+    .tile:hover { box-shadow: none; transform: none; }
+    .tile .remove { opacity: .85; }
   }
   @media (prefers-reduced-motion: reduce) {
     .btn-primary::after { transition: none; left: 0; display: none; }
@@ -433,7 +474,7 @@
       </div>
       <textarea id="topicArea" class="topic-area" rows="2"></textarea>
     </div>
-    <div class="btn-row">
+    <div class="btn-row gen-row">
       <button class="btn btn-primary" data-type="xiaohongshu">小红书种草</button>
       <button class="btn btn-primary" data-type="wechat_moment">朋友圈短文案</button>
       <button class="btn btn-primary" data-type="sales_script">销售话术</button>
