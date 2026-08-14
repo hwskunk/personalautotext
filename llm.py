@@ -36,4 +36,6 @@ def get_style_model(temperature: float = 0.7, streaming: bool = False):
         base_url=DEEPSEEK_BASE_URL,
         temperature=temperature,
         streaming=streaming,
+        # 画像 JSON 较长（样本多时输出可超 DeepSeek 默认 4096，会被截断损坏），放到上限 8192
+        max_tokens=8192,
     )

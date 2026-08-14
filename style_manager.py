@@ -179,7 +179,9 @@ def _validate_subtypes(raw, entry_count: int) -> dict | None:
                 return None
             mapping[int(k)] = v
         return mapping if set(mapping) == set(range(1, entry_count + 1)) else None
-    # 新格式：类 → 编号列表（全覆盖、不重复、不越界）
+    # 新格式：类 → 编号列表（全覆盖、不越界）
+    # 允许模型把编号重复分到多类（如晚归样本既算状态型也算自嘲型），
+    # 重复时保留先出现的类、忽略后续，避免因合理重叠而白白重试
     mapping = {}
     for cls in SUBTYPE_NAMES:
         for idx in raw.get(cls) or []:
@@ -187,8 +189,10 @@ def _validate_subtypes(raw, entry_count: int) -> dict | None:
                 i = int(idx)
             except (TypeError, ValueError):
                 return None
-            if not 1 <= i <= entry_count or i in mapping:
+            if not 1 <= i <= entry_count:
                 return None
+            if i in mapping:
+                continue
             mapping[i] = cls
     return mapping if set(mapping) == set(range(1, entry_count + 1)) else None
 
@@ -229,10 +233,10 @@ def build_style(industry: str | None = None) -> dict:
 
     llm = get_style_model()
 
-    # 子类型分类必须完整（键覆盖全部编号、值合法），最多重试 3 次
-    # （deepseek-chat 对长样本偶尔输出不完整，多试几次提高成功率）
+    # 子类型分类必须完整（键覆盖全部编号、值合法），最多重试 5 次
+    # （deepseek-chat 对长样本偶发输出坏 JSON 或分类重叠，多试几次提高成功率）
     mapping = None
-    for attempt in range(3):
+    for attempt in range(5):
         if attempt:
             logger.warning("画像解析/样本分类不完整，第 %d 次重试", attempt + 1)
         try:
