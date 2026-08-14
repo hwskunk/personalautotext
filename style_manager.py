@@ -228,7 +228,6 @@ def build_style(industry: str | None = None) -> dict:
     prompt = STYLE_ANALYSIS_PROMPT.format(count=len(entries), numbered_samples=numbered)
 
     llm = get_style_model()
-    parsed = _parse_style_json(llm.invoke(prompt).content)
 
     # 子类型分类必须完整（键覆盖全部编号、值合法），最多重试 3 次
     # （deepseek-chat 对长样本偶尔输出不完整，多试几次提高成功率）
