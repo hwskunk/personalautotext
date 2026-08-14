@@ -6,7 +6,7 @@ import random
 import re
 
 from config import ALLOWED_EXTENSIONS, DATA_DIR
-from llm import get_chat_model
+from llm import get_chat_model, get_topic_model
 from style_manager import SUBTYPE_NAMES, _split_entries, load_style
 
 # 开场场景池：每次生成由代码随机抽一个注入 prompt，
@@ -347,7 +347,7 @@ def build_topic(input_text: str) -> str:
     text = (input_text or "").strip()
     if not text:
         raise ValueError("输入不能为空")
-    llm = get_chat_model(temperature=0.7, streaming=False)
+    llm = get_topic_model(temperature=0.7, streaming=False)
     resp = llm.invoke(TOPIC_PROMPT_TMPL.format(input=text))
     return resp.content.strip()
 
